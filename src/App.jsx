@@ -1283,7 +1283,7 @@ export default function App() {
                   fontWeight: "bold",
                 }}
               >
-                نتيجة حرجة للمريض رقم {activeDoctorAlert.mrn}
+                critical result for pt MRN {activeDoctorAlert.mrn}
               </div>
 
               <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}>
