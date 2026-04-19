@@ -3,45 +3,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const STORAGE_KEYS = {
   session: "lab_portal_session",
   results: "lab_portal_results",
-  samples: "lab_portal_samples",
   entryMode: "lab_portal_entry_mode",
   form: "lab_portal_manual_form",
   scanForm: "lab_portal_scan_form",
-  sampleForm: "lab_portal_sample_form",
   extractedData: "lab_portal_extracted_data",
-  employees: "lab_portal_employees",
-  criticalAlerts: "lab_portal_critical_alerts",
 };
 
-const DEPARTMENT_OPTIONS = [
-  "Emergency",
-  "ICU",
-  "Ward",
-  "OPD",
-  "NICU",
-  "PICU",
-  "OR",
-  "Labor Room",
-  "Dialysis",
-  "Other",
-];
-
 const HOSPITAL_NAME = "King Salman Armed Forces Hospital";
-const SYSTEM_NAME = "Zero Downtime Lab Portal Prototype";
-
-function createId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
+const SYSTEM_NAME = "Zero Downtime Lab Portal";
 
 const defaultResults = [
   {
-    id: "res-1",
     barcode: "LIS-001",
     mrn: "MRN-102344",
-    department: "Emergency",
     patient: "Ahmed",
     test: "Potassium",
     result: "6.5",
@@ -51,76 +25,40 @@ const defaultResults = [
     technician: "Fatimah",
     synced: false,
     source: "Manual Entry",
-    createdAt: "2026-04-18 10:32",
-    comment: "Immediate clinician review recommended.",
   },
   {
-    id: "res-2",
     barcode: "LIS-002",
     mrn: "MRN-102355",
-    department: "ICU",
     patient: "Sara",
     test: "CBC",
     result: "WBC: 8.5 | RBC: 4.7 | Hb: 13.2 | Platelets: 220",
     status: "Normal",
     time: "10:38",
-    note: "Queued for LIS reconciliation",
+    note: "Pending LIS sync",
     technician: "Mona",
     synced: false,
     source: "Scanned Sheet",
-    createdAt: "2026-04-18 10:38",
-    comment: "",
   },
 ];
 
-const fixedUsers = {
-  admin: {
-    username: "admin",
+const users = {
+  lab: {
+    username: "lab",
     password: "1234",
-    role: "Admin",
-    name: "System Administrator",
-    active: true,
+    role: "Lab",
+    name: "Laboratory Staff",
   },
   doctor: {
     username: "doctor",
     password: "1234",
     role: "Doctor",
     name: "Duty Doctor",
-    active: true,
-  },
-  reception: {
-    username: "reception",
-    password: "1234",
-    role: "Reception",
-    name: "Sample Reception Staff",
-    active: true,
   },
 };
 
-const defaultEmployees = [
-  {
-    id: 1,
-    username: "lab",
-    password: "1234",
-    role: "Lab",
-    name: "Laboratory Staff",
-    active: true,
-  },
-  {
-    id: 2,
-    username: "reception1",
-    password: "1234",
-    role: "Reception",
-    name: "Reception Staff",
-    active: true,
-  },
-];
-
 const defaultManualForm = {
-  requestId: "",
   barcode: "",
   mrn: "",
-  department: "",
   patient: "",
   test: "CBC",
   result: "",
@@ -132,33 +70,18 @@ const defaultManualForm = {
   },
   time: "",
   technician: "",
-  comment: "",
 };
 
 const defaultScanForm = {
-  requestId: "",
   barcode: "",
   mrn: "",
-  department: "",
   patient: "",
   test: "CBC",
   time: "",
   technician: "",
   fileName: "",
   filePreview: "",
-  fileType: "",
   ocrText: "",
-  comment: "",
-};
-
-const defaultSampleForm = {
-  barcode: "",
-  mrn: "",
-  department: "",
-  patient: "",
-  test: "CBC",
-  receivedBy: "",
-  time: "",
 };
 
 function safeRead(key, fallback) {
@@ -168,61 +91,6 @@ function safeRead(key, fallback) {
   } catch {
     return fallback;
   }
-}
-
-function normalizeResults(data) {
-  if (!Array.isArray(data)) return defaultResults;
-
-  return data.map((item) => ({
-    id: item.id || createId(),
-    barcode: item.barcode || "",
-    mrn: item.mrn || "",
-    department: item.department || "",
-    patient: item.patient || "",
-    test: item.test || "",
-    result: item.result || "",
-    status: item.status || "Normal",
-    time: item.time || "",
-    note: item.note || "",
-    technician: item.technician || "",
-    synced: !!item.synced,
-    source: item.source || "Manual Entry",
-    createdAt: item.createdAt || "",
-    comment: item.comment || "",
-  }));
-}
-
-function normalizeSamples(data) {
-  if (!Array.isArray(data)) return [];
-
-  return data.map((item) => ({
-    id: item.id || createId(),
-    barcode: item.barcode || "",
-    mrn: item.mrn || "",
-    department: item.department || "",
-    patient: item.patient || "",
-    test: item.test || "CBC",
-    receivedBy: item.receivedBy || "",
-    time: item.time || "",
-    createdAt: item.createdAt || getNowDateTime(),
-  }));
-}
-
-function normalizeCriticalAlerts(data) {
-  if (!Array.isArray(data)) return [];
-
-  return data.map((item) => ({
-    id: item.id || createId(),
-    resultId: item.resultId || "",
-    mrn: item.mrn || "",
-    patient: item.patient || "",
-    test: item.test || "",
-    result: item.result || "",
-    status: item.status || "Critical",
-    createdAt: item.createdAt || "",
-    acknowledged: !!item.acknowledged,
-    comment: item.comment || "",
-  }));
 }
 
 function parseCSVLine(line) {
@@ -251,76 +119,23 @@ function parseCSVLine(line) {
   return values;
 }
 
-function getNowTime() {
-  return new Date().toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function getNowDateTime() {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mi = String(now.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}
-
 export default function App() {
   const [session, setSession] = useState(() => safeRead(STORAGE_KEYS.session, null));
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [loginError, setLoginError] = useState("");
-  const [results, setResults] = useState(() =>
-    normalizeResults(safeRead(STORAGE_KEYS.results, defaultResults))
-  );
-  const [samples, setSamples] = useState(() =>
-    normalizeSamples(safeRead(STORAGE_KEYS.samples, []))
-  );
+  const [results, setResults] = useState(() => safeRead(STORAGE_KEYS.results, defaultResults));
   const [search, setSearch] = useState("");
   const [entryMode, setEntryMode] = useState(() => safeRead(STORAGE_KEYS.entryMode, "manual"));
-  const [form, setForm] = useState(() => ({
-    ...defaultManualForm,
-    ...safeRead(STORAGE_KEYS.form, defaultManualForm),
-  }));
-  const [scanForm, setScanForm] = useState(() => ({
-    ...defaultScanForm,
-    ...safeRead(STORAGE_KEYS.scanForm, defaultScanForm),
-  }));
-  const [sampleForm, setSampleForm] = useState(() =>
-    safeRead(STORAGE_KEYS.sampleForm, defaultSampleForm)
-  );
+  const [form, setForm] = useState(() => safeRead(STORAGE_KEYS.form, defaultManualForm));
+  const [scanForm, setScanForm] = useState(() => safeRead(STORAGE_KEYS.scanForm, defaultScanForm));
   const [extractedData, setExtractedData] = useState(() =>
     safeRead(STORAGE_KEYS.extractedData, null)
   );
-  const [employees, setEmployees] = useState(() =>
-    safeRead(STORAGE_KEYS.employees, defaultEmployees)
-  );
-  const [criticalAlerts, setCriticalAlerts] = useState(() =>
-    normalizeCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, []))
-  );
-  const [employeeForm, setEmployeeForm] = useState({
-    name: "",
-    username: "",
-    password: "",
-    role: "Lab",
-  });
-
   const importInputRef = useRef(null);
-  const lastPlayedAlertIdsRef = useRef([]);
-
-  const canEnterResults = session?.role === "Lab" || session?.role === "All";
-  const canReceiveSamples = session?.role === "Reception" || session?.role === "All";
-  const canViewResultsPanel = session?.role !== "Reception";
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.results, JSON.stringify(results));
   }, [results]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.samples, JSON.stringify(samples));
-  }, [samples]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.entryMode, JSON.stringify(entryMode));
@@ -335,10 +150,6 @@ export default function App() {
   }, [scanForm]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.sampleForm, JSON.stringify(sampleForm));
-  }, [sampleForm]);
-
-  useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.extractedData, JSON.stringify(extractedData));
   }, [extractedData]);
 
@@ -347,17 +158,7 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.employees, JSON.stringify(employees));
-  }, [employees]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.criticalAlerts, JSON.stringify(criticalAlerts));
-  }, [criticalAlerts]);
-
-  useEffect(() => {
-    if (!session) return;
-
-    if (canEnterResults) {
+    if (session?.role === "Lab") {
       setForm((prev) => ({
         ...prev,
         technician: prev.technician || session.name,
@@ -368,123 +169,19 @@ export default function App() {
         technician: prev.technician || session.name,
       }));
     }
-
-    if (canReceiveSamples) {
-      setSampleForm((prev) => ({
-        ...prev,
-        receivedBy: prev.receivedBy || session.name,
-      }));
-    }
-  }, [canEnterResults, canReceiveSamples, session]);
-
-  useEffect(() => {
-    return () => {
-      if (scanForm.filePreview) {
-        URL.revokeObjectURL(scanForm.filePreview);
-      }
-    };
-  }, [scanForm.filePreview]);
-
-  useEffect(() => {
-    function handleStorageChange(e) {
-      if (e.key === STORAGE_KEYS.criticalAlerts) {
-        setCriticalAlerts(normalizeCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, [])));
-      }
-
-      if (e.key === STORAGE_KEYS.results) {
-        setResults(normalizeResults(safeRead(STORAGE_KEYS.results, defaultResults)));
-      }
-    }
-
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
-
-  const pendingDoctorAlerts = useMemo(() => {
-    return criticalAlerts.filter((item) => !item.acknowledged);
-  }, [criticalAlerts]);
-
-  useEffect(() => {
-    function playCriticalAlertSound() {
-      try {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass) return;
-
-        const audioCtx = new AudioContextClass();
-        const notes = [880, 660, 880];
-
-        notes.forEach((freq, index) => {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-
-          osc.type = "sine";
-          osc.frequency.value = freq;
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-
-          const start = audioCtx.currentTime + index * 0.22;
-          const end = start + 0.16;
-
-          gain.gain.setValueAtTime(0.0001, start);
-          gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.0001, end);
-
-          osc.start(start);
-          osc.stop(end + 0.02);
-        });
-      } catch {
-        // ignore audio failure
-      }
-    }
-
-    if (session?.role !== "Doctor") return;
-
-    const newUnheardAlerts = pendingDoctorAlerts.filter(
-      (alertItem) => !lastPlayedAlertIdsRef.current.includes(alertItem.id)
-    );
-
-    if (newUnheardAlerts.length > 0) {
-      playCriticalAlertSound();
-      lastPlayedAlertIdsRef.current = [
-        ...lastPlayedAlertIdsRef.current,
-        ...newUnheardAlerts.map((item) => item.id),
-      ];
-    }
-  }, [session, pendingDoctorAlerts]);
+  }, [session]);
 
   function handleLogin(e) {
     e.preventDefault();
-
     const username = loginForm.username.trim().toLowerCase();
-    const password = loginForm.password;
+    const user = users[username];
 
-    const fixedUser = fixedUsers[username];
-
-    if (fixedUser) {
-      if (!fixedUser.active || fixedUser.password !== password) {
-        setLoginError("Invalid username or password");
-        return;
-      }
-
-      setSession(fixedUser);
-      setLoginError("");
-      setSearch("");
-      return;
-    }
-
-    const employee = employees.find(
-      (emp) =>
-        emp.username.toLowerCase() === username &&
-        emp.password === password &&
-        emp.active
-    );
-
-    if (!employee) {
+    if (!user || user.password !== loginForm.password) {
       setLoginError("Invalid username or password");
       return;
     }
 
-    setSession(employee);
+    setSession(user);
     setLoginError("");
     setSearch("");
   }
@@ -503,41 +200,24 @@ export default function App() {
     );
     if (!ok) return;
 
-    if (scanForm.filePreview) {
-      URL.revokeObjectURL(scanForm.filePreview);
-    }
-
     localStorage.removeItem(STORAGE_KEYS.results);
-    localStorage.removeItem(STORAGE_KEYS.samples);
     localStorage.removeItem(STORAGE_KEYS.entryMode);
     localStorage.removeItem(STORAGE_KEYS.form);
     localStorage.removeItem(STORAGE_KEYS.scanForm);
-    localStorage.removeItem(STORAGE_KEYS.sampleForm);
     localStorage.removeItem(STORAGE_KEYS.extractedData);
     localStorage.removeItem(STORAGE_KEYS.session);
-    localStorage.removeItem(STORAGE_KEYS.employees);
-    localStorage.removeItem(STORAGE_KEYS.criticalAlerts);
 
     setResults(defaultResults);
-    setSamples([]);
     setEntryMode("manual");
     setForm({
       ...defaultManualForm,
-      technician: canEnterResults && session ? session.name : "",
+      technician: session?.role === "Lab" ? session.name : "",
     });
     setScanForm({
       ...defaultScanForm,
-      technician: canEnterResults && session ? session.name : "",
-    });
-    setSampleForm({
-      ...defaultSampleForm,
-      receivedBy: canReceiveSamples && session ? session.name : "",
+      technician: session?.role === "Lab" ? session.name : "",
     });
     setExtractedData(null);
-    setEmployees(defaultEmployees);
-    setCriticalAlerts([]);
-    lastPlayedAlertIdsRef.current = [];
-    setEmployeeForm({ name: "", username: "", password: "", role: "Lab" });
     setSearch("");
   }
 
@@ -548,10 +228,8 @@ export default function App() {
     }
 
     const headers = [
-      "ID",
       "Barcode",
       "MRN",
-      "Department",
       "Patient",
       "Test",
       "Result",
@@ -559,17 +237,13 @@ export default function App() {
       "Synced",
       "Source",
       "Time",
-      "CreatedAt",
       "Technician",
       "Note",
-      "Comment",
     ];
 
     const rows = results.map((item) => [
-      item.id,
       item.barcode,
       item.mrn,
-      item.department,
       item.patient,
       item.test,
       item.result,
@@ -577,10 +251,8 @@ export default function App() {
       item.synced ? "Yes" : "No",
       item.source,
       item.time,
-      item.createdAt,
       item.technician,
       item.note,
-      item.comment,
     ]);
 
     const csvContent = [headers, ...rows]
@@ -628,14 +300,6 @@ export default function App() {
 
         const headers = parseCSVLine(lines[0]).map((h) => h.trim().toLowerCase());
 
-        const requiredHeaders = ["barcode", "mrn", "patient", "test", "result"];
-        const missingHeaders = requiredHeaders.filter((h) => !headers.includes(h));
-
-        if (missingHeaders.length) {
-          alert(`Missing required columns: ${missingHeaders.join(", ")}`);
-          return;
-        }
-
         const importedRows = lines.slice(1).map((line) => {
           const cols = parseCSVLine(line);
 
@@ -645,10 +309,8 @@ export default function App() {
           });
 
           return {
-            id: row["id"] || createId(),
             barcode: row["barcode"] || "",
             mrn: row["mrn"] || "",
-            department: row["department"] || "",
             patient: row["patient"] || "",
             test: row["test"] || "",
             result: row["result"] || "",
@@ -656,15 +318,13 @@ export default function App() {
             synced: String(row["synced"] || "").toLowerCase() === "yes",
             source: row["source"] || "Imported CSV",
             time: row["time"] || "",
-            createdAt: row["createdat"] || getNowDateTime(),
             technician: row["technician"] || "",
             note: row["note"] || "Imported from CSV",
-            comment: row["comment"] || "",
           };
         });
 
         const validRows = importedRows.filter(
-          (row) => row.barcode || row.mrn || row.department || row.patient || row.test || row.result
+          (row) => row.barcode || row.mrn || row.patient || row.test || row.result
         );
 
         if (!validRows.length) {
@@ -693,81 +353,6 @@ export default function App() {
     };
 
     reader.readAsText(file);
-  }
-
-  function handleAddSample(e) {
-    e.preventDefault();
-
-    if (!canReceiveSamples) return;
-
-    if (
-      !sampleForm.barcode ||
-      !sampleForm.mrn ||
-      !sampleForm.department ||
-      !sampleForm.patient ||
-      !sampleForm.test ||
-      !sampleForm.receivedBy
-    ) {
-      alert("Please fill all required fields");
-      return;
-    }
-
-    const newSample = {
-      id: createId(),
-      barcode: sampleForm.barcode,
-      mrn: sampleForm.mrn,
-      department: sampleForm.department,
-      patient: sampleForm.patient,
-      test: sampleForm.test,
-      receivedBy: sampleForm.receivedBy,
-      time:
-        sampleForm.time ||
-        new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      createdAt: getNowDateTime(),
-    };
-
-    setSamples((prev) => [newSample, ...prev]);
-    setSampleForm({
-      ...defaultSampleForm,
-      receivedBy: session.name,
-    });
-  }
-
-  function loadSampleToEntry(sample, mode = "manual") {
-    if (!canEnterResults) return;
-
-    if (mode === "manual") {
-      setForm({
-        ...defaultManualForm,
-        requestId: sample.id,
-        barcode: sample.barcode,
-        mrn: sample.mrn,
-        department: sample.department,
-        patient: sample.patient,
-        test: sample.test,
-        technician: session.name,
-        comment: "",
-      });
-      setEntryMode("manual");
-      return;
-    }
-
-    setScanForm({
-      ...defaultScanForm,
-      requestId: sample.id,
-      barcode: sample.barcode,
-      mrn: sample.mrn,
-      department: sample.department,
-      patient: sample.patient,
-      test: sample.test,
-      technician: session.name,
-      comment: "",
-    });
-    setExtractedData(null);
-    setEntryMode("scan");
   }
 
   function getStatus(test, result, cbc) {
@@ -805,42 +390,12 @@ export default function App() {
     return "Normal";
   }
 
-  function createCriticalAlert(resultItem) {
-    setCriticalAlerts((prev) => {
-      const alreadyExists = prev.some((alertItem) => alertItem.resultId === resultItem.id);
-      if (alreadyExists) return prev;
-
-      const alertItem = {
-        id: createId(),
-        resultId: resultItem.id,
-        mrn: resultItem.mrn,
-        patient: resultItem.patient,
-        test: resultItem.test,
-        result: resultItem.result,
-        status: resultItem.status,
-        createdAt: resultItem.createdAt,
-        acknowledged: false,
-        comment: resultItem.comment || "",
-      };
-
-      return [alertItem, ...prev];
-    });
-  }
-
-  function acknowledgeCriticalAlert(alertId) {
-    setCriticalAlerts((prev) =>
-      prev.map((item) =>
-        item.id === alertId ? { ...item, acknowledged: true } : item
-      )
-    );
-  }
-
   function handleAddResult(e) {
     e.preventDefault();
 
-    if (!canEnterResults) return;
+    if (session?.role !== "Lab") return;
 
-    if (!form.barcode || !form.mrn || !form.department || !form.patient || !form.test || !form.technician) {
+    if (!form.barcode || !form.mrn || !form.patient || !form.test || !form.technician) {
       alert("Please fill all required fields");
       return;
     }
@@ -864,32 +419,25 @@ export default function App() {
     }
 
     const newResult = {
-      id: createId(),
       barcode: form.barcode,
       mrn: form.mrn,
-      department: form.department,
       patient: form.patient,
       test: form.test,
       result: finalResult,
-      time: form.time || getNowTime(),
+      time:
+        form.time ||
+        new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
       status,
       note: "Issued during LIS downtime",
       technician: form.technician,
       synced: false,
       source: "Manual Entry",
-      createdAt: getNowDateTime(),
-      comment: form.comment?.trim() || "",
     };
 
     setResults((prev) => [newResult, ...prev]);
-
-    if (newResult.status === "Critical") {
-      createCriticalAlert(newResult);
-    }
-
-    if (form.requestId) {
-      setSamples((prev) => prev.filter((item) => item.id !== form.requestId));
-    }
 
     setForm({
       ...defaultManualForm,
@@ -949,24 +497,19 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (scanForm.filePreview) {
-      URL.revokeObjectURL(scanForm.filePreview);
-    }
-
     const previewUrl = URL.createObjectURL(file);
 
     setScanForm((prev) => ({
       ...prev,
       fileName: file.name,
       filePreview: previewUrl,
-      fileType: file.type,
     }));
   }
 
   function handleSaveScannedResult() {
-    if (!canEnterResults) return;
+    if (session?.role !== "Lab") return;
 
-    if (!scanForm.barcode || !scanForm.mrn || !scanForm.department || !scanForm.patient || !scanForm.test || !scanForm.technician) {
+    if (!scanForm.barcode || !scanForm.mrn || !scanForm.patient || !scanForm.test || !scanForm.technician) {
       alert("Please fill all required fields");
       return;
     }
@@ -977,36 +520,25 @@ export default function App() {
     }
 
     const newResult = {
-      id: createId(),
       barcode: scanForm.barcode,
       mrn: scanForm.mrn,
-      department: scanForm.department,
       patient: scanForm.patient,
       test: scanForm.test,
       result: extractedData.result,
-      time: scanForm.time || getNowTime(),
+      time:
+        scanForm.time ||
+        new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
       status: extractedData.status,
       note: "Extracted from scanned result sheet",
       technician: scanForm.technician,
       synced: false,
       source: "Scanned Sheet",
-      createdAt: getNowDateTime(),
-      comment: scanForm.comment?.trim() || "",
     };
 
     setResults((prev) => [newResult, ...prev]);
-
-    if (newResult.status === "Critical") {
-      createCriticalAlert(newResult);
-    }
-
-    if (scanForm.requestId) {
-      setSamples((prev) => prev.filter((item) => item.id !== scanForm.requestId));
-    }
-
-    if (scanForm.filePreview) {
-      URL.revokeObjectURL(scanForm.filePreview);
-    }
 
     setScanForm({
       ...defaultScanForm,
@@ -1016,16 +548,16 @@ export default function App() {
     setExtractedData(null);
   }
 
-  function handleSync(id) {
-    if (!canEnterResults) return;
+  function handleSync(index) {
+    if (session?.role !== "Lab") return;
 
     setResults((prev) =>
-      prev.map((item) =>
-        item.id === id
+      prev.map((item, i) =>
+        i === index
           ? {
               ...item,
               synced: true,
-              note: "Marked for LIS reconciliation",
+              note: "Synced to LIS",
             }
           : item
       )
@@ -1063,17 +595,14 @@ export default function App() {
           <div class="box">
             <p><span class="label">Barcode:</span> ${item.barcode}</p>
             <p><span class="label">MRN:</span> ${item.mrn}</p>
-            <p><span class="label">Department:</span> ${item.department || "-"}</p>
             <p><span class="label">Patient:</span> ${item.patient}</p>
             <p><span class="label">Test:</span> ${item.test}</p>
             <p><span class="label">Result:</span> ${item.result}</p>
             <p><span class="label">Status:</span> ${item.status}</p>
             <p><span class="label">Time:</span> ${item.time}</p>
-            <p><span class="label">Created At:</span> ${item.createdAt || "-"}</p>
             <p><span class="label">Technician:</span> ${item.technician}</p>
             <p><span class="label">Source:</span> ${item.source}</p>
             <p><span class="label">Note:</span> ${item.note}</p>
-            <p><span class="label">Comment:</span> ${item.comment || "-"}</p>
           </div>
 
           <p class="note">Pending official LIS verification if not yet synchronized.</p>
@@ -1084,76 +613,6 @@ export default function App() {
     reportWindow.print();
   }
 
-  function handleAddEmployee(e) {
-    e.preventDefault();
-
-    if (session?.role !== "Admin") return;
-
-    const name = employeeForm.name.trim();
-    const username = employeeForm.username.trim().toLowerCase();
-    const password = employeeForm.password.trim();
-    const role = employeeForm.role;
-
-    if (!name || !username || !password || !role) {
-      alert("Please fill all employee fields");
-      return;
-    }
-
-    const usernameExistsInFixedUsers = !!fixedUsers[username];
-    const usernameExistsInEmployees = employees.some(
-      (emp) => emp.username.toLowerCase() === username
-    );
-
-    if (usernameExistsInFixedUsers || usernameExistsInEmployees) {
-      alert("Username already exists");
-      return;
-    }
-
-    const newEmployee = {
-      id: Date.now(),
-      name,
-      username,
-      password,
-      role,
-      active: true,
-    };
-
-    setEmployees((prev) => [...prev, newEmployee]);
-    setEmployeeForm({ name: "", username: "", password: "", role: "Lab" });
-  }
-
-  function handleToggleEmployee(id) {
-    if (session?.role !== "Admin") return;
-
-    setEmployees((prev) =>
-      prev.map((emp) =>
-        emp.id === id ? { ...emp, active: !emp.active } : emp
-      )
-    );
-  }
-
-  function handleDeleteEmployee(id) {
-    if (session?.role !== "Admin") return;
-
-    const ok = window.confirm("Delete this employee?");
-    if (!ok) return;
-
-    setEmployees((prev) => prev.filter((emp) => emp.id !== id));
-  }
-
-  function handleResetEmployeePassword(id) {
-    if (session?.role !== "Admin") return;
-
-    const newPassword = window.prompt("Enter new password:");
-    if (!newPassword) return;
-
-    setEmployees((prev) =>
-      prev.map((emp) =>
-        emp.id === id ? { ...emp, password: newPassword } : emp
-      )
-    );
-  }
-
   const filteredResults = useMemo(() => {
     const q = search.toLowerCase().trim();
 
@@ -1162,44 +621,18 @@ export default function App() {
       return results.filter((item) => item.mrn.toLowerCase().includes(q));
     }
 
-    if (session?.role === "Admin") {
-      if (!q) return results;
-
-      return results.filter((item) =>
-        [
-          item.barcode,
-          item.mrn,
-          item.department,
-          item.patient,
-          item.test,
-          item.result,
-          item.status,
-          item.technician,
-          item.source,
-          item.createdAt,
-          item.comment,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(q)
-      );
-    }
-
     if (!q) return results;
 
     return results.filter((item) =>
       [
         item.barcode,
         item.mrn,
-        item.department,
         item.patient,
         item.test,
         item.result,
         item.status,
         item.technician,
         item.source,
-        item.createdAt,
-        item.comment,
       ]
         .join(" ")
         .toLowerCase()
@@ -1209,7 +642,6 @@ export default function App() {
 
   const criticalCount = results.filter((r) => r.status === "Critical").length;
   const pendingSyncCount = results.filter((r) => !r.synced).length;
-  const pendingDoctorAlertsCount = pendingDoctorAlerts.length;
 
   function badgeStyle(status) {
     if (status === "Critical") {
@@ -1233,8 +665,8 @@ export default function App() {
     };
   }
 
-  function syncBadgeStyle(syncedOrActive) {
-    return syncedOrActive
+  function syncBadgeStyle(synced) {
+    return synced
       ? {
           background: "#dbeafe",
           color: "#1d4ed8",
@@ -1257,17 +689,15 @@ export default function App() {
               <div style={loginHospitalNameStyle}>{HOSPITAL_NAME}</div>
               <h1 style={loginTitleStyle}>{SYSTEM_NAME}</h1>
               <p style={loginSubtitleStyle}>
-                Prototype access for downtime result handling during LIS maintenance.
+                Secure login for downtime result access during LIS maintenance.
               </p>
             </div>
           </div>
 
           <div style={demoBoxStyle}>
-            <div style={{ fontWeight: "bold", marginBottom: 8 }}>Prototype Demo Accounts</div>
-            <div>Admin: <strong>admin</strong> / 1234</div>
-            <div>Doctor: <strong>doctor</strong> / 1234</div>
+            <div style={{ fontWeight: "bold", marginBottom: 8 }}>Demo Accounts</div>
             <div>Lab: <strong>lab</strong> / 1234</div>
-            <div>Reception: <strong>reception</strong> / 1234</div>
+            <div>Doctor: <strong>doctor</strong> / 1234</div>
           </div>
 
           <form onSubmit={handleLogin}>
@@ -1277,7 +707,7 @@ export default function App() {
                 value={loginForm.username}
                 onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
                 style={inputStyle}
-                placeholder="admin, doctor, or lab"
+                placeholder="lab or doctor"
               />
             </div>
 
@@ -1304,56 +734,6 @@ export default function App() {
   return (
     <div style={pageStyle}>
       <div style={{ maxWidth: "1450px", margin: "0 auto" }}>
-        {session?.role === "Doctor" && pendingDoctorAlertsCount > 0 && (
-          <div style={criticalAlertOverlayStyle}>
-            <div style={criticalAlertBoxStyle}>
-              <div style={criticalAlertHeaderStyle}>
-                <div>
-                  <div style={criticalAlertTitleStyle}>Critical Results Alerts</div>
-                  <div style={{ color: "#475569", marginTop: 4 }}>
-                    Please review and acknowledge the following critical results.
-                  </div>
-                </div>
-
-                <div style={criticalAlertCounterStyle}>
-                  {pendingDoctorAlertsCount} alert{pendingDoctorAlertsCount > 1 ? "s" : ""}
-                </div>
-              </div>
-
-              <div style={criticalAlertListStyle}>
-                {pendingDoctorAlerts.map((alertItem) => (
-                  <div key={alertItem.id} style={criticalAlertItemStyle}>
-                    <div style={criticalAlertItemTopStyle}>
-                      <div style={{ fontWeight: "bold", color: "#7f1d1d", fontSize: 18 }}>
-                        نتيجة حرجة للمريض رقم {alertItem.mrn}
-                      </div>
-
-                      <button
-                        type="button"
-                        style={smallButtonOrange}
-                        onClick={() => acknowledgeCriticalAlert(alertItem.id)}
-                      >
-                        تم الاطلاع
-                      </button>
-                    </div>
-
-                    <div style={criticalAlertDetailsStyle}>
-                      <div><strong>MRN:</strong> {alertItem.mrn}</div>
-                      <div><strong>Patient:</strong> {alertItem.patient || "-"}</div>
-                      <div><strong>Test:</strong> {alertItem.test}</div>
-                      <div><strong>Result:</strong> {alertItem.result}</div>
-                      <div><strong>Time:</strong> {alertItem.createdAt || "-"}</div>
-                      <div>
-                        <strong>Comment:</strong> {alertItem.comment || "-"}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         <div style={topBannerStyle}>
           <div
             style={{
@@ -1373,13 +753,13 @@ export default function App() {
                 <div style={topHospitalNameStyle}>{HOSPITAL_NAME}</div>
                 <h1 style={topSystemNameStyle}>{SYSTEM_NAME}</h1>
                 <div style={topSubTextStyle}>
-                  Prototype workflow for temporary reporting during LIS downtime
+                  Secure temporary reporting and physician access during LIS downtime
                 </div>
               </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", alignItems: "flex-end" }}>
-              <div style={statusPillStyle}>LIS Status: Scheduled Maintenance Window</div>
+              <div style={statusPillStyle}>LIS Status: Scheduled Maintenance</div>
               <div style={loggedUserStyle}>
                 Logged in as <strong>{session.name}</strong> ({session.role})
               </div>
@@ -1387,10 +767,10 @@ export default function App() {
           </div>
 
           <div style={headerButtonsRowStyle}>
-            <button type="button" onClick={handleExportCSV} style={smallButtonGreen}>Export CSV</button>
-            <button type="button" onClick={openImportDialog} style={smallButtonPurple}>Import CSV</button>
-            <button type="button" onClick={resetAllSavedData} style={smallButtonOrange}>Reset Saved Data</button>
-            <button type="button" onClick={handleLogout} style={smallButtonGray}>Logout</button>
+            <button onClick={handleExportCSV} style={smallButtonGreen}>Export CSV</button>
+            <button onClick={openImportDialog} style={smallButtonPurple}>Import CSV</button>
+            <button onClick={resetAllSavedData} style={smallButtonOrange}>Reset Saved Data</button>
+            <button onClick={handleLogout} style={smallButtonGray}>Logout</button>
             <input
               ref={importInputRef}
               type="file"
@@ -1404,309 +784,23 @@ export default function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns:
-              canEnterResults || session.role === "Admin" ? "1.2fr 2fr" : "1fr",
+            gridTemplateColumns: session.role === "Lab" ? "1.2fr 2fr" : "1fr",
             gap: "24px",
           }}
         >
-          {session.role === "Admin" && (
-            <div style={panelStyle}>
-              <h2 style={{ marginTop: 0 }}>Admin Panel</h2>
-              <p style={{ color: "#64748b" }}>
-                Prototype controls for demonstrating staff roles and access flow.
-              </p>
-
-              <form onSubmit={handleAddEmployee}>
-                <div style={{ marginBottom: "12px" }}>
-                  <label>Employee Name</label>
-                  <input
-                    value={employeeForm.name}
-                    onChange={(e) =>
-                      setEmployeeForm({ ...employeeForm, name: e.target.value })
-                    }
-                    style={inputStyle}
-                    placeholder="Employee full name"
-                  />
-                </div>
-
-                <div style={{ marginBottom: "12px" }}>
-                  <label>Username</label>
-                  <input
-                    value={employeeForm.username}
-                    onChange={(e) =>
-                      setEmployeeForm({ ...employeeForm, username: e.target.value })
-                    }
-                    style={inputStyle}
-                    placeholder="Username"
-                  />
-                </div>
-
-                <div style={{ marginBottom: "16px" }}>
-                  <label>Password</label>
-                  <input
-                    value={employeeForm.password}
-                    onChange={(e) =>
-                      setEmployeeForm({ ...employeeForm, password: e.target.value })
-                    }
-                    style={inputStyle}
-                    placeholder="Password"
-                  />
-                </div>
-
-                <div style={{ marginBottom: "16px" }}>
-                  <label>Role</label>
-                  <select
-                    value={employeeForm.role}
-                    onChange={(e) =>
-                      setEmployeeForm({ ...employeeForm, role: e.target.value })
-                    }
-                    style={inputStyle}
-                  >
-                    <option value="Lab">Lab</option>
-                    <option value="Reception">Reception</option>
-                    <option value="All">All Access</option>
-                  </select>
-                </div>
-
-                <button type="submit" style={buttonStyleInline}>
-                  Add Employee
-                </button>
-              </form>
-
-              <div style={{ marginTop: 24 }}>
-                <h3>Lab Employees</h3>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: "#f8fafc" }}>
-                        <th style={thStyle}>Name</th>
-                        <th style={thStyle}>Username</th>
-                        <th style={thStyle}>Role</th>
-                        <th style={thStyle}>Status</th>
-                        <th style={thStyle}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {employees.map((emp) => (
-                        <tr key={emp.id}>
-                          <td style={tdStyle}>{emp.name}</td>
-                          <td style={tdStyle}>{emp.username}</td>
-                          <td style={tdStyle}>{emp.role}</td>
-                          <td style={tdStyle}>
-                            <span
-                              style={{
-                                ...syncBadgeStyle(emp.active),
-                                borderRadius: "999px",
-                                padding: "6px 12px",
-                                fontSize: "12px",
-                                fontWeight: "bold",
-                                display: "inline-block",
-                              }}
-                            >
-                              {emp.active ? "Active" : "Disabled"}
-                            </span>
-                          </td>
-                          <td style={tdStyle}>
-                            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                              <button
-                                type="button"
-                                style={smallButtonBlue}
-                                onClick={() => handleToggleEmployee(emp.id)}
-                              >
-                                {emp.active ? "Disable" : "Enable"}
-                              </button>
-
-                              <button
-                                type="button"
-                                style={smallButtonPurple}
-                                onClick={() => handleResetEmployeePassword(emp.id)}
-                              >
-                                Reset Password
-                              </button>
-
-                              <button
-                                type="button"
-                                style={smallButtonOrange}
-                                onClick={() => handleDeleteEmployee(emp.id)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {canReceiveSamples && (
-            <div style={panelStyle}>
-              <h2 style={{ marginTop: 0 }}>Sample Reception Entry</h2>
-              <p style={{ color: "#64748b" }}>
-                Enter the sample details and requested test only. Results are completed later by the laboratory team.
-              </p>
-
-              <form onSubmit={handleAddSample}>
-                <div style={{ marginBottom: "12px" }}>
-                  <label>Barcode</label>
-                  <input
-                    value={sampleForm.barcode}
-                    onChange={(e) => setSampleForm({ ...sampleForm, barcode: e.target.value })}
-                    style={inputStyle}
-                    placeholder="Scan barcode"
-                  />
-                </div>
-
-                <div style={{ marginBottom: "12px" }}>
-                  <label>MRN</label>
-                  <input
-                    value={sampleForm.mrn}
-                    onChange={(e) => setSampleForm({ ...sampleForm, mrn: e.target.value })}
-                    style={inputStyle}
-                    placeholder="Patient MRN"
-                  />
-                </div>
-
-                <div style={{ marginBottom: "12px" }}>
-                  <label>Department</label>
-                  <select
-                    value={sampleForm.department}
-                    onChange={(e) => setSampleForm({ ...sampleForm, department: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option value="">Select department</option>
-                    {DEPARTMENT_OPTIONS.map((department) => (
-                      <option key={department} value={department}>
-                        {department}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ marginBottom: "12px" }}>
-                  <label>Patient Name</label>
-                  <input
-                    value={sampleForm.patient}
-                    onChange={(e) => setSampleForm({ ...sampleForm, patient: e.target.value })}
-                    style={inputStyle}
-                    placeholder="Patient name"
-                  />
-                </div>
-
-                <div style={{ marginBottom: "12px" }}>
-                  <label>Requested Test</label>
-                  <select
-                    value={sampleForm.test}
-                    onChange={(e) => setSampleForm({ ...sampleForm, test: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option>CBC</option>
-                    <option>Potassium</option>
-                    <option>Creatinine</option>
-                    <option>Troponin</option>
-                  </select>
-                </div>
-
-                <div style={{ marginBottom: "12px" }}>
-                  <label>Received Time</label>
-                  <input
-                    value={sampleForm.time}
-                    onChange={(e) => setSampleForm({ ...sampleForm, time: e.target.value })}
-                    style={inputStyle}
-                    placeholder="10:45"
-                  />
-                </div>
-
-                <div style={{ marginBottom: "16px" }}>
-                  <label>Received By</label>
-                  <input
-                    value={sampleForm.receivedBy}
-                    onChange={(e) => setSampleForm({ ...sampleForm, receivedBy: e.target.value })}
-                    style={inputStyle}
-                    placeholder="Reception staff name"
-                  />
-                </div>
-
-                <button type="submit" style={buttonStyle}>
-                  Save Sample Request
-                </button>
-              </form>
-            </div>
-          )}
-
-          {canEnterResults && (
+          {session.role === "Lab" && (
             <div style={panelStyle}>
               <h2 style={{ marginTop: 0 }}>Lab Entry</h2>
-              <p style={{ color: "#64748b" }}>
-                Complete results for incoming samples or enter a new result manually.
-              </p>
-
-              <div style={{ ...infoBoxStyle, marginBottom: 18 }}>
-                <div style={{ fontWeight: "bold", marginBottom: 8 }}>Samples Received From Reception</div>
-                {samples.length === 0 ? (
-                  <div style={{ color: "#64748b" }}>No pending samples from reception.</div>
-                ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ background: "#f8fafc" }}>
-                          <th style={thStyle}>Barcode</th>
-                          <th style={thStyle}>MRN</th>
-                          <th style={thStyle}>Department</th>
-                          <th style={thStyle}>Patient</th>
-                          <th style={thStyle}>Test</th>
-                          <th style={thStyle}>Received By</th>
-                          <th style={thStyle}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {samples.map((sample) => (
-                          <tr key={sample.id}>
-                            <td style={tdStyle}>{sample.barcode}</td>
-                            <td style={tdStyle}>{sample.mrn}</td>
-                            <td style={tdStyle}>{sample.department || "-"}</td>
-                            <td style={tdStyle}>{sample.patient}</td>
-                            <td style={tdStyle}>{sample.test}</td>
-                            <td style={tdStyle}>{sample.receivedBy || "-"}</td>
-                            <td style={tdStyle}>
-                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                <button
-                                  type="button"
-                                  style={smallButtonBlue}
-                                  onClick={() => loadSampleToEntry(sample, "manual")}
-                                >
-                                  Load to Manual
-                                </button>
-                                <button
-                                  type="button"
-                                  style={smallButtonPurple}
-                                  onClick={() => loadSampleToEntry(sample, "scan")}
-                                >
-                                  Load to Scan
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+              <p style={{ color: "#64748b" }}>Choose manual entry or scanned result sheet.</p>
 
               <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
                 <button
-                  type="button"
                   onClick={() => setEntryMode("manual")}
                   style={entryMode === "manual" ? activeTabStyle : inactiveTabStyle}
                 >
                   Manual Entry
                 </button>
                 <button
-                  type="button"
                   onClick={() => setEntryMode("scan")}
                   style={entryMode === "scan" ? activeTabStyle : inactiveTabStyle}
                 >
@@ -1716,11 +810,6 @@ export default function App() {
 
               {entryMode === "manual" ? (
                 <form onSubmit={handleAddResult}>
-                  {form.requestId && (
-                    <div style={{ ...reviewCardStyle, marginBottom: 16 }}>
-                      Loaded sample from reception. Completing this result will remove it from the pending sample list.
-                    </div>
-                  )}
                   <div style={{ marginBottom: "12px" }}>
                     <label>Barcode</label>
                     <input
@@ -1739,22 +828,6 @@ export default function App() {
                       style={inputStyle}
                       placeholder="Patient MRN"
                     />
-                  </div>
-
-                  <div style={{ marginBottom: "12px" }}>
-                    <label>Department</label>
-                    <select
-                      value={form.department}
-                      onChange={(e) => setForm({ ...form, department: e.target.value })}
-                      style={inputStyle}
-                    >
-                      <option value="">Select department</option>
-                      {DEPARTMENT_OPTIONS.map((department) => (
-                        <option key={department} value={department}>
-                          {department}
-                        </option>
-                      ))}
-                    </select>
                   </div>
 
                   <div style={{ marginBottom: "12px" }}>
@@ -1867,7 +940,7 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: "16px" }}>
                     <label>Technician Name</label>
                     <input
                       value={form.technician}
@@ -1877,27 +950,12 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "16px" }}>
-                    <label>Comment / Note (Optional)</label>
-                    <textarea
-                      value={form.comment}
-                      onChange={(e) => setForm({ ...form, comment: e.target.value })}
-                      style={{ ...inputStyle, minHeight: 90, resize: "vertical" }}
-                      placeholder="Add optional comment for the doctor or record..."
-                    />
-                  </div>
-
                   <button type="submit" style={buttonStyle}>
                     Save Manual Result
                   </button>
                 </form>
               ) : (
                 <div>
-                  {scanForm.requestId && (
-                    <div style={{ ...reviewCardStyle, marginBottom: 16 }}>
-                      Loaded sample from reception. Saving the scanned result will remove it from the pending sample list.
-                    </div>
-                  )}
                   <div style={{ marginBottom: "12px" }}>
                     <label>Barcode</label>
                     <input
@@ -1916,22 +974,6 @@ export default function App() {
                       style={inputStyle}
                       placeholder="Patient MRN"
                     />
-                  </div>
-
-                  <div style={{ marginBottom: "12px" }}>
-                    <label>Department</label>
-                    <select
-                      value={scanForm.department}
-                      onChange={(e) => setScanForm({ ...scanForm, department: e.target.value })}
-                      style={inputStyle}
-                    >
-                      <option value="">Select department</option>
-                      {DEPARTMENT_OPTIONS.map((department) => (
-                        <option key={department} value={department}>
-                          {department}
-                        </option>
-                      ))}
-                    </select>
                   </div>
 
                   <div style={{ marginBottom: "12px" }}>
@@ -1963,12 +1005,7 @@ export default function App() {
 
                   <div style={{ marginBottom: "12px" }}>
                     <label>Upload Result Sheet</label>
-                    <input
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={handleScanFileChange}
-                      style={inputStyle}
-                    />
+                    <input type="file" accept="image/*,.pdf" onChange={handleScanFileChange} style={inputStyle} />
                   </div>
 
                   {scanForm.fileName && (
@@ -1980,33 +1017,18 @@ export default function App() {
                   {scanForm.filePreview && (
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ marginBottom: 8, fontWeight: "bold" }}>Preview</div>
-
-                      {scanForm.fileType === "application/pdf" ? (
-                        <iframe
-                          src={scanForm.filePreview}
-                          title="Uploaded PDF preview"
-                          style={{
-                            width: "100%",
-                            height: 320,
-                            border: "1px solid #cbd5e1",
-                            borderRadius: 12,
-                            background: "#fff",
-                          }}
-                        />
-                      ) : (
-                        <img
-                          src={scanForm.filePreview}
-                          alt="Uploaded result sheet preview"
-                          style={{
-                            width: "100%",
-                            maxHeight: 220,
-                            objectFit: "contain",
-                            border: "1px solid #cbd5e1",
-                            borderRadius: 12,
-                            background: "#fff",
-                          }}
-                        />
-                      )}
+                      <img
+                        src={scanForm.filePreview}
+                        alt="Uploaded result sheet preview"
+                        style={{
+                          width: "100%",
+                          maxHeight: 220,
+                          objectFit: "contain",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: 12,
+                          background: "#fff",
+                        }}
+                      />
                     </div>
                   )}
 
@@ -2030,23 +1052,13 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: "16px" }}>
                     <label>Technician Name</label>
                     <input
                       value={scanForm.technician}
                       onChange={(e) => setScanForm({ ...scanForm, technician: e.target.value })}
                       style={inputStyle}
                       placeholder="Technician name"
-                    />
-                  </div>
-
-                  <div style={{ marginBottom: "16px" }}>
-                    <label>Comment / Note (Optional)</label>
-                    <textarea
-                      value={scanForm.comment}
-                      onChange={(e) => setScanForm({ ...scanForm, comment: e.target.value })}
-                      style={{ ...inputStyle, minHeight: 90, resize: "vertical" }}
-                      placeholder="Add optional comment for the doctor or record..."
                     />
                   </div>
 
@@ -2086,252 +1098,201 @@ export default function App() {
             </div>
           )}
 
-          {canViewResultsPanel && (
-            <div style={panelStyle}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: "16px",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <h2 style={{ marginTop: 0, marginBottom: "6px" }}>
-                    {session.role === "Doctor"
-                      ? "Doctor Portal"
-                      : session.role === "Admin"
-                      ? "System Overview"
-                      : "Doctor View"}
-                  </h2>
-                  <p style={{ color: "#64748b", margin: 0 }}>
-                    {session.role === "Doctor"
-                      ? "Search by patient MRN to view results"
-                      : session.role === "Admin"
-                      ? "Review all downtime results and account activity"
-                      : "Search temporary results during LIS downtime"}
-                  </p>
-                </div>
-
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={{ ...inputStyle, width: "280px", marginBottom: 0 }}
-                  placeholder={
-                    session?.role === "Doctor"
-                      ? "Search by patient MRN only..."
-                      : "Search by barcode, MRN, patient..."
-                  }
-                />
+          <div style={panelStyle}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "16px",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <h2 style={{ marginTop: 0, marginBottom: "6px" }}>
+                  {session.role === "Doctor" ? "Doctor Portal" : "Doctor View"}
+                </h2>
+                <p style={{ color: "#64748b", margin: 0 }}>
+                  {session.role === "Doctor"
+                    ? "Search by patient MRN to view results"
+                    : "Search temporary results during LIS downtime"}
+                </p>
               </div>
 
-              {session.role === "Doctor" && (
-                <div
-                  style={{
-                    marginTop: "16px",
-                    marginBottom: "18px",
-                    display: "flex",
-                    gap: "12px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div style={{ ...cardStyle, minWidth: 220, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                    <div style={{ color: "#b91c1c", fontSize: "14px" }}>Pending Critical Alerts</div>
-                    <div
-                      style={{
-                        fontSize: "28px",
-                        fontWeight: "bold",
-                        marginTop: "8px",
-                        color: "#b91c1c",
-                      }}
-                    >
-                      {pendingDoctorAlertsCount}
-                    </div>
-                  </div>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ ...inputStyle, width: "280px", marginBottom: 0 }}
+                placeholder={
+                  session?.role === "Doctor"
+                    ? "Search by patient MRN only..."
+                    : "Search by barcode, MRN, patient..."
+                }
+              />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: "12px",
+                marginTop: "20px",
+                marginBottom: "20px",
+              }}
+            >
+              <div style={cardStyle}>
+                <div style={{ color: "#64748b", fontSize: "14px" }}>Results Entered</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold", marginTop: "8px" }}>
+                  {results.length}
                 </div>
-              )}
+              </div>
 
-              {session.role !== "Doctor" && (
+              <div style={{ ...cardStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                <div style={{ color: "#b91c1c", fontSize: "14px" }}>Critical Alerts</div>
                 <div
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: "12px",
-                    marginTop: "20px",
-                    marginBottom: "20px",
-                  }}
-                >
-                  <div style={cardStyle}>
-                    <div style={{ color: "#64748b", fontSize: "14px" }}>Results Entered</div>
-                    <div style={{ fontSize: "28px", fontWeight: "bold", marginTop: "8px" }}>
-                      {results.length}
-                    </div>
-                  </div>
-
-                  <div style={{ ...cardStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                    <div style={{ color: "#b91c1c", fontSize: "14px" }}>Critical Alerts</div>
-                    <div
-                      style={{
-                        fontSize: "28px",
-                        fontWeight: "bold",
-                        marginTop: "8px",
-                        color: "#b91c1c",
-                      }}
-                    >
-                      {criticalCount}
-                    </div>
-                  </div>
-
-                  <div style={{ ...cardStyle, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
-                    <div style={{ color: "#1d4ed8", fontSize: "14px" }}>Pending Reconciliation</div>
-                    <div
-                      style={{
-                        fontSize: "28px",
-                        fontWeight: "bold",
-                        marginTop: "8px",
-                        color: "#1d4ed8",
-                      }}
-                    >
-                      {pendingSyncCount}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {session?.role === "Doctor" && !search.trim() && (
-                <div
-                  style={{
-                    marginTop: "20px",
-                    marginBottom: "16px",
-                    background: "#fff7ed",
-                    border: "1px solid #fed7aa",
-                    borderRadius: "16px",
-                    padding: "16px",
-                    color: "#9a3412",
+                    fontSize: "28px",
                     fontWeight: "bold",
+                    marginTop: "8px",
+                    color: "#b91c1c",
                   }}
                 >
-                  Please enter the patient MRN to view results.
+                  {criticalCount}
                 </div>
-              )}
+              </div>
 
-              {session?.role === "Doctor" && search.trim() && filteredResults.length === 0 && (
+              <div style={{ ...cardStyle, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+                <div style={{ color: "#1d4ed8", fontSize: "14px" }}>Pending Sync</div>
                 <div
                   style={{
-                    marginTop: "20px",
-                    marginBottom: "16px",
-                    background: "#f8fafc",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "16px",
-                    padding: "16px",
-                    color: "#475569",
+                    fontSize: "28px",
                     fontWeight: "bold",
+                    marginTop: "8px",
+                    color: "#1d4ed8",
                   }}
                 >
-                  No results found for this MRN.
+                  {pendingSyncCount}
                 </div>
-              )}
-
-              {session?.role === "Doctor" && !search.trim() ? null : (
-                <div style={{ overflowX: "auto", marginTop: session.role === "Doctor" ? 20 : 0 }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: "#f8fafc" }}>
-                        <th style={thStyle}>Barcode</th>
-                        <th style={thStyle}>MRN</th>
-                        <th style={thStyle}>Department</th>
-                        <th style={thStyle}>Patient</th>
-                        <th style={thStyle}>Test</th>
-                        <th style={thStyle}>Result</th>
-                        <th style={thStyle}>Status</th>
-                        <th style={thStyle}>Sync</th>
-                        <th style={thStyle}>Source</th>
-                        <th style={thStyle}>Time</th>
-                        <th style={thStyle}>Created At</th>
-                        <th style={thStyle}>Technician</th>
-                        <th style={thStyle}>Note</th>
-                        <th style={thStyle}>Comment</th>
-                        <th style={thStyle}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredResults.map((item) => (
-                        <tr key={item.id}>
-                          <td style={tdStyle}>{item.barcode}</td>
-                          <td style={tdStyle}>{item.mrn}</td>
-                          <td style={tdStyle}>{item.department || "-"}</td>
-                          <td style={tdStyle}>{item.patient}</td>
-                          <td style={tdStyle}>{item.test}</td>
-                          <td style={tdStyle}>{item.result}</td>
-                          <td style={tdStyle}>
-                            <span
-                              style={{
-                                ...badgeStyle(item.status),
-                                borderRadius: "999px",
-                                padding: "6px 12px",
-                                fontSize: "12px",
-                                fontWeight: "bold",
-                                display: "inline-block",
-                              }}
-                            >
-                              {item.status}
-                            </span>
-                          </td>
-                          <td style={tdStyle}>
-                            <span
-                              style={{
-                                ...syncBadgeStyle(item.synced),
-                                borderRadius: "999px",
-                                padding: "6px 12px",
-                                fontSize: "12px",
-                                fontWeight: "bold",
-                                display: "inline-block",
-                              }}
-                            >
-                              {item.synced ? "Synced" : "Pending"}
-                            </span>
-                          </td>
-                          <td style={tdStyle}>{item.source}</td>
-                          <td style={tdStyle}>{item.time}</td>
-                          <td style={tdStyle}>{item.createdAt || "-"}</td>
-                          <td style={tdStyle}>{item.technician}</td>
-                          <td style={tdStyle}>{item.note}</td>
-                          <td style={tdStyle}>{item.comment || "-"}</td>
-                          <td style={tdStyle}>
-                            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                              {canEnterResults && !item.synced && (
-                                <button
-                                  type="button"
-                                  style={smallButtonBlue}
-                                  onClick={() => handleSync(item.id)}
-                                >
-                                  Mark for LIS Entry
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                style={smallButtonGray}
-                                onClick={() => handlePrint(item)}
-                              >
-                                Print
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <div style={aiNoteStyle}>
-                <strong>Prototype Notice:</strong> results and downtime work are saved locally in this browser
-                and can be exported to CSV for later reconciliation. This demo does not connect directly to
-                the live LIS.
               </div>
             </div>
-          )}
+
+            {session?.role === "Doctor" && !search.trim() && (
+              <div
+                style={{
+                  marginTop: "8px",
+                  marginBottom: "16px",
+                  background: "#fff7ed",
+                  border: "1px solid #fed7aa",
+                  borderRadius: "16px",
+                  padding: "16px",
+                  color: "#9a3412",
+                  fontWeight: "bold",
+                }}
+              >
+                Please enter the patient MRN to view results.
+              </div>
+            )}
+
+            {session?.role === "Doctor" && search.trim() && filteredResults.length === 0 && (
+              <div
+                style={{
+                  marginTop: "8px",
+                  marginBottom: "16px",
+                  background: "#f8fafc",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "16px",
+                  padding: "16px",
+                  color: "#475569",
+                  fontWeight: "bold",
+                }}
+              >
+                No results found for this MRN.
+              </div>
+            )}
+
+            {session?.role === "Doctor" && !search.trim() ? null : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc" }}>
+                      <th style={thStyle}>Barcode</th>
+                      <th style={thStyle}>MRN</th>
+                      <th style={thStyle}>Patient</th>
+                      <th style={thStyle}>Test</th>
+                      <th style={thStyle}>Result</th>
+                      <th style={thStyle}>Status</th>
+                      <th style={thStyle}>Sync</th>
+                      <th style={thStyle}>Source</th>
+                      <th style={thStyle}>Time</th>
+                      <th style={thStyle}>Technician</th>
+                      <th style={thStyle}>Note</th>
+                      <th style={thStyle}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredResults.map((item, index) => (
+                      <tr key={index}>
+                        <td style={tdStyle}>{item.barcode}</td>
+                        <td style={tdStyle}>{item.mrn}</td>
+                        <td style={tdStyle}>{item.patient}</td>
+                        <td style={tdStyle}>{item.test}</td>
+                        <td style={tdStyle}>{item.result}</td>
+                        <td style={tdStyle}>
+                          <span
+                            style={{
+                              ...badgeStyle(item.status),
+                              borderRadius: "999px",
+                              padding: "6px 12px",
+                              fontSize: "12px",
+                              fontWeight: "bold",
+                              display: "inline-block",
+                            }}
+                          >
+                            {item.status}
+                          </span>
+                        </td>
+                        <td style={tdStyle}>
+                          <span
+                            style={{
+                              ...syncBadgeStyle(item.synced),
+                              borderRadius: "999px",
+                              padding: "6px 12px",
+                              fontSize: "12px",
+                              fontWeight: "bold",
+                              display: "inline-block",
+                            }}
+                          >
+                            {item.synced ? "Synced" : "Pending"}
+                          </span>
+                        </td>
+                        <td style={tdStyle}>{item.source}</td>
+                        <td style={tdStyle}>{item.time}</td>
+                        <td style={tdStyle}>{item.technician}</td>
+                        <td style={tdStyle}>{item.note}</td>
+                        <td style={tdStyle}>
+                          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                            {session.role === "Lab" && !item.synced && (
+                              <button style={smallButtonBlue} onClick={() => handleSync(index)}>
+                                Sync to LIS
+                              </button>
+                            )}
+                            <button style={smallButtonGray} onClick={() => handlePrint(item)}>
+                              Print
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={aiNoteStyle}>
+              <strong>AI Safety Layer:</strong> results and downtime work are saved locally in the browser,
+              can be exported to CSV, and re-imported while awaiting full system integration.
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2654,82 +1615,4 @@ const tdStyle = {
   padding: "12px",
   borderBottom: "1px solid #e2e8f0",
   verticalAlign: "top",
-};
-
-const criticalAlertOverlayStyle = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(15, 23, 42, 0.45)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 9999,
-  padding: 20,
-};
-
-const criticalAlertBoxStyle = {
-  width: "100%",
-  maxWidth: 760,
-  maxHeight: "85vh",
-  overflowY: "auto",
-  background: "#ffffff",
-  borderRadius: 24,
-  padding: 24,
-  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
-  border: "2px solid #fecaca",
-};
-
-const criticalAlertHeaderStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 16,
-  marginBottom: 18,
-  flexWrap: "wrap",
-};
-
-const criticalAlertTitleStyle = {
-  fontSize: 26,
-  fontWeight: "bold",
-  color: "#b91c1c",
-};
-
-const criticalAlertCounterStyle = {
-  background: "#fee2e2",
-  color: "#991b1b",
-  border: "1px solid #fecaca",
-  borderRadius: 999,
-  padding: "8px 14px",
-  fontWeight: "bold",
-  fontSize: 14,
-};
-
-const criticalAlertListStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 16,
-};
-
-const criticalAlertItemStyle = {
-  background: "#fff7ed",
-  border: "1px solid #fed7aa",
-  borderRadius: 18,
-  padding: 16,
-};
-
-const criticalAlertItemTopStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 16,
-  marginBottom: 12,
-  flexWrap: "wrap",
-};
-
-const criticalAlertDetailsStyle = {
-  background: "#f8fafc",
-  border: "1px solid #e2e8f0",
-  borderRadius: 16,
-  padding: 16,
-  lineHeight: 1.9,
 };
