@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   sampleForm: "lab_portal_sample_form",
   extractedData: "lab_portal_extracted_data",
   employees: "lab_portal_employees",
+  criticalAlerts: "lab_portal_critical_alerts",
 };
 
 const DEPARTMENT_OPTIONS = [
@@ -268,6 +269,9 @@ export default function App() {
   const [employees, setEmployees] = useState(() =>
     safeRead(STORAGE_KEYS.employees, defaultEmployees)
   );
+  const [criticalAlerts, setCriticalAlerts] = useState(() =>
+    safeRead(STORAGE_KEYS.criticalAlerts, [])
+  );
   const [employeeForm, setEmployeeForm] = useState({
     name: "",
     username: "",
@@ -276,6 +280,8 @@ export default function App() {
   });
 
   const importInputRef = useRef(null);
+  const lastPlayedAlertRef = useRef(null);
+
   const canEnterResults = session?.role === "Lab" || session?.role === "All";
   const canReceiveSamples = session?.role === "Reception" || session?.role === "All";
   const canViewResultsPanel = session?.role !== "Reception";
@@ -317,6 +323,12 @@ export default function App() {
   }, [employees]);
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.criticalAlerts, JSON.stringify(criticalAlerts));
+  }, [criticalAlerts]);
+
+  useEffect(() => {
+    if (!session) return;
+
     if (canEnterResults) {
       setForm((prev) => ({
         ...prev,
@@ -344,6 +356,71 @@ export default function App() {
       }
     };
   }, [scanForm.filePreview]);
+
+  useEffect(() => {
+    function handleStorageChange(e) {
+      if (e.key === STORAGE_KEYS.criticalAlerts) {
+        setCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, []));
+      }
+
+      if (e.key === STORAGE_KEYS.results) {
+        setResults(normalizeResults(safeRead(STORAGE_KEYS.results, defaultResults)));
+      }
+    }
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+  const pendingDoctorAlerts = useMemo(() => {
+    return criticalAlerts.filter((item) => !item.acknowledged);
+  }, [criticalAlerts]);
+
+  const activeDoctorAlert =
+    session?.role === "Doctor" && pendingDoctorAlerts.length > 0
+      ? pendingDoctorAlerts[0]
+      : null;
+
+  useEffect(() => {
+    function playCriticalAlertSound() {
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+
+        const audioCtx = new AudioContextClass();
+        const notes = [880, 660, 880];
+
+        notes.forEach((freq, index) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+
+          osc.type = "sine";
+          osc.frequency.value = freq;
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+
+          const start = audioCtx.currentTime + index * 0.22;
+          const end = start + 0.16;
+
+          gain.gain.setValueAtTime(0.0001, start);
+          gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+          osc.start(start);
+          osc.stop(end + 0.02);
+        });
+      } catch {
+        // ignore audio failure
+      }
+    }
+
+    if (session?.role === "Doctor" && activeDoctorAlert) {
+      if (lastPlayedAlertRef.current !== activeDoctorAlert.id) {
+        lastPlayedAlertRef.current = activeDoctorAlert.id;
+        playCriticalAlertSound();
+      }
+    }
+  }, [session, activeDoctorAlert]);
 
   function handleLogin(e) {
     e.preventDefault();
@@ -409,24 +486,26 @@ export default function App() {
     localStorage.removeItem(STORAGE_KEYS.extractedData);
     localStorage.removeItem(STORAGE_KEYS.session);
     localStorage.removeItem(STORAGE_KEYS.employees);
+    localStorage.removeItem(STORAGE_KEYS.criticalAlerts);
 
     setResults(defaultResults);
     setSamples([]);
     setEntryMode("manual");
     setForm({
       ...defaultManualForm,
-      technician: canEnterResults ? session.name : "",
+      technician: canEnterResults && session ? session.name : "",
     });
     setScanForm({
       ...defaultScanForm,
-      technician: canEnterResults ? session.name : "",
+      technician: canEnterResults && session ? session.name : "",
     });
     setSampleForm({
       ...defaultSampleForm,
-      receivedBy: canReceiveSamples ? session.name : "",
+      receivedBy: canReceiveSamples && session ? session.name : "",
     });
     setExtractedData(null);
     setEmployees(defaultEmployees);
+    setCriticalAlerts([]);
     setEmployeeForm({ name: "", username: "", password: "", role: "Lab" });
     setSearch("");
   }
@@ -690,6 +769,30 @@ export default function App() {
     return "Normal";
   }
 
+  function createCriticalAlert(resultItem) {
+    const alertItem = {
+      id: createId(),
+      resultId: resultItem.id,
+      mrn: resultItem.mrn,
+      patient: resultItem.patient,
+      test: resultItem.test,
+      result: resultItem.result,
+      status: resultItem.status,
+      createdAt: resultItem.createdAt,
+      acknowledged: false,
+    };
+
+    setCriticalAlerts((prev) => [alertItem, ...prev]);
+  }
+
+  function acknowledgeCriticalAlert(alertId) {
+    setCriticalAlerts((prev) =>
+      prev.map((item) =>
+        item.id === alertId ? { ...item, acknowledged: true } : item
+      )
+    );
+  }
+
   function handleAddResult(e) {
     e.preventDefault();
 
@@ -736,6 +839,11 @@ export default function App() {
     };
 
     setResults((prev) => [newResult, ...prev]);
+
+    if (newResult.status === "Critical") {
+      createCriticalAlert(newResult);
+    }
+
     if (form.requestId) {
       setSamples((prev) => prev.filter((item) => item.id !== form.requestId));
     }
@@ -843,6 +951,11 @@ export default function App() {
     };
 
     setResults((prev) => [newResult, ...prev]);
+
+    if (newResult.status === "Critical") {
+      createCriticalAlert(newResult);
+    }
+
     if (scanForm.requestId) {
       setSamples((prev) => prev.filter((item) => item.id !== scanForm.requestId));
     }
@@ -1072,8 +1185,8 @@ export default function App() {
     };
   }
 
-  function syncBadgeStyle(synced) {
-    return synced
+  function syncBadgeStyle(syncedOrActive) {
+    return syncedOrActive
       ? {
           background: "#dbeafe",
           color: "#1d4ed8",
@@ -1143,6 +1256,49 @@ export default function App() {
   return (
     <div style={pageStyle}>
       <div style={{ maxWidth: "1450px", margin: "0 auto" }}>
+        {session?.role === "Doctor" && activeDoctorAlert && (
+          <div style={criticalAlertOverlayStyle}>
+            <div style={criticalAlertBoxStyle}>
+              <div style={criticalAlertTitleStyle}>Critical Result Alert</div>
+              <div style={{ color: "#475569", marginBottom: 16 }}>
+                A critical result has been entered and requires doctor attention.
+              </div>
+
+              <div style={criticalAlertDetailsStyle}>
+                <div><strong>MRN:</strong> {activeDoctorAlert.mrn}</div>
+                <div><strong>Patient:</strong> {activeDoctorAlert.patient || "-"}</div>
+                <div><strong>Test:</strong> {activeDoctorAlert.test}</div>
+                <div><strong>Result:</strong> {activeDoctorAlert.result}</div>
+                <div><strong>Time:</strong> {activeDoctorAlert.createdAt || "-"}</div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 16,
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  color: "#b91c1c",
+                  borderRadius: 12,
+                  padding: 12,
+                  fontWeight: "bold",
+                }}
+              >
+                نتيجة حرجة للمريض رقم {activeDoctorAlert.mrn}
+              </div>
+
+              <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  style={smallButtonOrange}
+                  onClick={() => acknowledgeCriticalAlert(activeDoctorAlert.id)}
+                >
+                  إغلاق التنبيه
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={topBannerStyle}>
           <div
             style={{
@@ -1176,10 +1332,10 @@ export default function App() {
           </div>
 
           <div style={headerButtonsRowStyle}>
-            <button onClick={handleExportCSV} style={smallButtonGreen}>Export CSV</button>
-            <button onClick={openImportDialog} style={smallButtonPurple}>Import CSV</button>
-            <button onClick={resetAllSavedData} style={smallButtonOrange}>Reset Saved Data</button>
-            <button onClick={handleLogout} style={smallButtonGray}>Logout</button>
+            <button type="button" onClick={handleExportCSV} style={smallButtonGreen}>Export CSV</button>
+            <button type="button" onClick={openImportDialog} style={smallButtonPurple}>Import CSV</button>
+            <button type="button" onClick={resetAllSavedData} style={smallButtonOrange}>Reset Saved Data</button>
+            <button type="button" onClick={handleLogout} style={smallButtonGray}>Logout</button>
             <input
               ref={importInputRef}
               type="file"
@@ -1298,6 +1454,7 @@ export default function App() {
                           <td style={tdStyle}>
                             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                               <button
+                                type="button"
                                 style={smallButtonBlue}
                                 onClick={() => handleToggleEmployee(emp.id)}
                               >
@@ -1305,6 +1462,7 @@ export default function App() {
                               </button>
 
                               <button
+                                type="button"
                                 style={smallButtonPurple}
                                 onClick={() => handleResetEmployeePassword(emp.id)}
                               >
@@ -1312,6 +1470,7 @@ export default function App() {
                               </button>
 
                               <button
+                                type="button"
                                 style={smallButtonOrange}
                                 onClick={() => handleDeleteEmployee(emp.id)}
                               >
@@ -1485,12 +1644,14 @@ export default function App() {
 
               <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
                 <button
+                  type="button"
                   onClick={() => setEntryMode("manual")}
                   style={entryMode === "manual" ? activeTabStyle : inactiveTabStyle}
                 >
                   Manual Entry
                 </button>
                 <button
+                  type="button"
                   onClick={() => setEntryMode("scan")}
                   style={entryMode === "scan" ? activeTabStyle : inactiveTabStyle}
                 >
@@ -1851,214 +2012,222 @@ export default function App() {
           )}
 
           {canViewResultsPanel && (
-          <div style={panelStyle}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: "16px",
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <div>
-                <h2 style={{ marginTop: 0, marginBottom: "6px" }}>
-                  {session.role === "Doctor"
-                    ? "Doctor Portal"
-                    : session.role === "Admin"
-                    ? "System Overview"
-                    : "Doctor View"}
-                </h2>
-                <p style={{ color: "#64748b", margin: 0 }}>
-                  {session.role === "Doctor"
-                    ? "Search by patient MRN to view results"
-                    : session.role === "Admin"
-                    ? "Review all downtime results and account activity"
-                    : "Search temporary results during LIS downtime"}
-                </p>
-              </div>
-
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ ...inputStyle, width: "280px", marginBottom: 0 }}
-                placeholder={
-                  session?.role === "Doctor"
-                    ? "Search by patient MRN only..."
-                    : "Search by barcode, MRN, patient..."
-                }
-              />
-            </div>
-
-            {session.role !== "Doctor" && (
+            <div style={panelStyle}>
               <div
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: "12px",
-                  marginTop: "20px",
-                  marginBottom: "20px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                  alignItems: "center",
+                  flexWrap: "wrap",
                 }}
               >
-                <div style={cardStyle}>
-                  <div style={{ color: "#64748b", fontSize: "14px" }}>Results Entered</div>
-                  <div style={{ fontSize: "28px", fontWeight: "bold", marginTop: "8px" }}>
-                    {results.length}
-                  </div>
+                <div>
+                  <h2 style={{ marginTop: 0, marginBottom: "6px" }}>
+                    {session.role === "Doctor"
+                      ? "Doctor Portal"
+                      : session.role === "Admin"
+                      ? "System Overview"
+                      : "Doctor View"}
+                  </h2>
+                  <p style={{ color: "#64748b", margin: 0 }}>
+                    {session.role === "Doctor"
+                      ? "Search by patient MRN to view results"
+                      : session.role === "Admin"
+                      ? "Review all downtime results and account activity"
+                      : "Search temporary results during LIS downtime"}
+                  </p>
                 </div>
 
-                <div style={{ ...cardStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                  <div style={{ color: "#b91c1c", fontSize: "14px" }}>Critical Alerts</div>
-                  <div
-                    style={{
-                      fontSize: "28px",
-                      fontWeight: "bold",
-                      marginTop: "8px",
-                      color: "#b91c1c",
-                    }}
-                  >
-                    {criticalCount}
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  style={{ ...inputStyle, width: "280px", marginBottom: 0 }}
+                  placeholder={
+                    session?.role === "Doctor"
+                      ? "Search by patient MRN only..."
+                      : "Search by barcode, MRN, patient..."
+                  }
+                />
+              </div>
+
+              {session.role !== "Doctor" && (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: "12px",
+                    marginTop: "20px",
+                    marginBottom: "20px",
+                  }}
+                >
+                  <div style={cardStyle}>
+                    <div style={{ color: "#64748b", fontSize: "14px" }}>Results Entered</div>
+                    <div style={{ fontSize: "28px", fontWeight: "bold", marginTop: "8px" }}>
+                      {results.length}
+                    </div>
+                  </div>
+
+                  <div style={{ ...cardStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                    <div style={{ color: "#b91c1c", fontSize: "14px" }}>Critical Alerts</div>
+                    <div
+                      style={{
+                        fontSize: "28px",
+                        fontWeight: "bold",
+                        marginTop: "8px",
+                        color: "#b91c1c",
+                      }}
+                    >
+                      {criticalCount}
+                    </div>
+                  </div>
+
+                  <div style={{ ...cardStyle, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+                    <div style={{ color: "#1d4ed8", fontSize: "14px" }}>Pending Reconciliation</div>
+                    <div
+                      style={{
+                        fontSize: "28px",
+                        fontWeight: "bold",
+                        marginTop: "8px",
+                        color: "#1d4ed8",
+                      }}
+                    >
+                      {pendingSyncCount}
+                    </div>
                   </div>
                 </div>
+              )}
 
-                <div style={{ ...cardStyle, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
-                <div style={{ color: "#1d4ed8", fontSize: "14px" }}>Pending Reconciliation</div>
-                  <div
-                    style={{
-                      fontSize: "28px",
-                      fontWeight: "bold",
-                      marginTop: "8px",
-                      color: "#1d4ed8",
-                    }}
-                  >
-                    {pendingSyncCount}
-                  </div>
+              {session?.role === "Doctor" && !search.trim() && (
+                <div
+                  style={{
+                    marginTop: "20px",
+                    marginBottom: "16px",
+                    background: "#fff7ed",
+                    border: "1px solid #fed7aa",
+                    borderRadius: "16px",
+                    padding: "16px",
+                    color: "#9a3412",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Please enter the patient MRN to view results.
                 </div>
-              </div>
-            )}
+              )}
 
-            {session?.role === "Doctor" && !search.trim() && (
-              <div
-                style={{
-                  marginTop: "20px",
-                  marginBottom: "16px",
-                  background: "#fff7ed",
-                  border: "1px solid #fed7aa",
-                  borderRadius: "16px",
-                  padding: "16px",
-                  color: "#9a3412",
-                  fontWeight: "bold",
-                }}
-              >
-                Please enter the patient MRN to view results.
-              </div>
-            )}
+              {session?.role === "Doctor" && search.trim() && filteredResults.length === 0 && (
+                <div
+                  style={{
+                    marginTop: "20px",
+                    marginBottom: "16px",
+                    background: "#f8fafc",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "16px",
+                    padding: "16px",
+                    color: "#475569",
+                    fontWeight: "bold",
+                  }}
+                >
+                  No results found for this MRN.
+                </div>
+              )}
 
-            {session?.role === "Doctor" && search.trim() && filteredResults.length === 0 && (
-              <div
-                style={{
-                  marginTop: "20px",
-                  marginBottom: "16px",
-                  background: "#f8fafc",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "16px",
-                  padding: "16px",
-                  color: "#475569",
-                  fontWeight: "bold",
-                }}
-              >
-                No results found for this MRN.
-              </div>
-            )}
-
-            {session?.role === "Doctor" && !search.trim() ? null : (
-              <div style={{ overflowX: "auto", marginTop: session.role === "Doctor" ? 20 : 0 }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ background: "#f8fafc" }}>
-                      <th style={thStyle}>Barcode</th>
-                      <th style={thStyle}>MRN</th>
-                      <th style={thStyle}>Department</th>
-                      <th style={thStyle}>Patient</th>
-                      <th style={thStyle}>Test</th>
-                      <th style={thStyle}>Result</th>
-                      <th style={thStyle}>Status</th>
-                      <th style={thStyle}>Sync</th>
-                      <th style={thStyle}>Source</th>
-                      <th style={thStyle}>Time</th>
-                      <th style={thStyle}>Created At</th>
-                      <th style={thStyle}>Technician</th>
-                      <th style={thStyle}>Note</th>
-                      <th style={thStyle}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredResults.map((item) => (
-                      <tr key={item.id}>
-                        <td style={tdStyle}>{item.barcode}</td>
-                        <td style={tdStyle}>{item.mrn}</td>
-                        <td style={tdStyle}>{item.department || "-"}</td>
-                        <td style={tdStyle}>{item.patient}</td>
-                        <td style={tdStyle}>{item.test}</td>
-                        <td style={tdStyle}>{item.result}</td>
-                        <td style={tdStyle}>
-                          <span
-                            style={{
-                              ...badgeStyle(item.status),
-                              borderRadius: "999px",
-                              padding: "6px 12px",
-                              fontSize: "12px",
-                              fontWeight: "bold",
-                              display: "inline-block",
-                            }}
-                          >
-                            {item.status}
-                          </span>
-                        </td>
-                        <td style={tdStyle}>
-                          <span
-                            style={{
-                              ...syncBadgeStyle(item.synced),
-                              borderRadius: "999px",
-                              padding: "6px 12px",
-                              fontSize: "12px",
-                              fontWeight: "bold",
-                              display: "inline-block",
-                            }}
-                          >
-                            {item.synced ? "Synced" : "Pending"}
-                          </span>
-                        </td>
-                        <td style={tdStyle}>{item.source}</td>
-                        <td style={tdStyle}>{item.time}</td>
-                        <td style={tdStyle}>{item.createdAt || "-"}</td>
-                        <td style={tdStyle}>{item.technician}</td>
-                        <td style={tdStyle}>{item.note}</td>
-                        <td style={tdStyle}>
-                          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                            {canEnterResults && !item.synced && (
-                              <button style={smallButtonBlue} onClick={() => handleSync(item.id)}>
-                                Mark for LIS Entry
-                              </button>
-                            )}
-                            <button style={smallButtonGray} onClick={() => handlePrint(item)}>
-                              Print
-                            </button>
-                          </div>
-                        </td>
+              {session?.role === "Doctor" && !search.trim() ? null : (
+                <div style={{ overflowX: "auto", marginTop: session.role === "Doctor" ? 20 : 0 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc" }}>
+                        <th style={thStyle}>Barcode</th>
+                        <th style={thStyle}>MRN</th>
+                        <th style={thStyle}>Department</th>
+                        <th style={thStyle}>Patient</th>
+                        <th style={thStyle}>Test</th>
+                        <th style={thStyle}>Result</th>
+                        <th style={thStyle}>Status</th>
+                        <th style={thStyle}>Sync</th>
+                        <th style={thStyle}>Source</th>
+                        <th style={thStyle}>Time</th>
+                        <th style={thStyle}>Created At</th>
+                        <th style={thStyle}>Technician</th>
+                        <th style={thStyle}>Note</th>
+                        <th style={thStyle}>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody>
+                      {filteredResults.map((item) => (
+                        <tr key={item.id}>
+                          <td style={tdStyle}>{item.barcode}</td>
+                          <td style={tdStyle}>{item.mrn}</td>
+                          <td style={tdStyle}>{item.department || "-"}</td>
+                          <td style={tdStyle}>{item.patient}</td>
+                          <td style={tdStyle}>{item.test}</td>
+                          <td style={tdStyle}>{item.result}</td>
+                          <td style={tdStyle}>
+                            <span
+                              style={{
+                                ...badgeStyle(item.status),
+                                borderRadius: "999px",
+                                padding: "6px 12px",
+                                fontSize: "12px",
+                                fontWeight: "bold",
+                                display: "inline-block",
+                              }}
+                            >
+                              {item.status}
+                            </span>
+                          </td>
+                          <td style={tdStyle}>
+                            <span
+                              style={{
+                                ...syncBadgeStyle(item.synced),
+                                borderRadius: "999px",
+                                padding: "6px 12px",
+                                fontSize: "12px",
+                                fontWeight: "bold",
+                                display: "inline-block",
+                              }}
+                            >
+                              {item.synced ? "Synced" : "Pending"}
+                            </span>
+                          </td>
+                          <td style={tdStyle}>{item.source}</td>
+                          <td style={tdStyle}>{item.time}</td>
+                          <td style={tdStyle}>{item.createdAt || "-"}</td>
+                          <td style={tdStyle}>{item.technician}</td>
+                          <td style={tdStyle}>{item.note}</td>
+                          <td style={tdStyle}>
+                            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                              {canEnterResults && !item.synced && (
+                                <button
+                                  type="button"
+                                  style={smallButtonBlue}
+                                  onClick={() => handleSync(item.id)}
+                                >
+                                  Mark for LIS Entry
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                style={smallButtonGray}
+                                onClick={() => handlePrint(item)}
+                              >
+                                Print
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
-            <div style={aiNoteStyle}>
-              <strong>Prototype Notice:</strong> results and downtime work are saved locally in this browser
-              and can be exported to CSV for later reconciliation. This demo does not connect directly to
-              the live LIS.
+              <div style={aiNoteStyle}>
+                <strong>Prototype Notice:</strong> results and downtime work are saved locally in this browser
+                and can be exported to CSV for later reconciliation. This demo does not connect directly to
+                the live LIS.
+              </div>
             </div>
-          </div>
           )}
         </div>
       </div>
@@ -2382,4 +2551,40 @@ const tdStyle = {
   padding: "12px",
   borderBottom: "1px solid #e2e8f0",
   verticalAlign: "top",
+};
+
+const criticalAlertOverlayStyle = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.45)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 9999,
+  padding: 20,
+};
+
+const criticalAlertBoxStyle = {
+  width: "100%",
+  maxWidth: 560,
+  background: "#ffffff",
+  borderRadius: 24,
+  padding: 24,
+  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+  border: "2px solid #fecaca",
+};
+
+const criticalAlertTitleStyle = {
+  fontSize: 26,
+  fontWeight: "bold",
+  color: "#b91c1c",
+  marginBottom: 10,
+};
+
+const criticalAlertDetailsStyle = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 16,
+  padding: 16,
+  lineHeight: 1.9,
 };
