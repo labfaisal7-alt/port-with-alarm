@@ -1,0 +1,419 @@
+import { useMemo, useState } from "react";
+
+const initialResults = [
+  {
+    barcode: "LIS-001",
+    mrn: "MRN-102344",
+    patient: "Ahmed",
+    test: "Potassium",
+    result: "6.5",
+    status: "Critical",
+    time: "10:32",
+    note: "Issued during LIS downtime",
+  },
+  {
+    barcode: "LIS-002",
+    mrn: "MRN-102355",
+    patient: "Sara",
+    test: "CBC",
+    result: "Normal",
+    status: "Normal",
+    time: "10:38",
+    note: "Pending LIS sync",
+  },
+];
+
+export default function App() {
+  const [results, setResults] = useState(initialResults);
+  const [search, setSearch] = useState("");
+  const [form, setForm] = useState({
+    barcode: "",
+    mrn: "",
+    patient: "",
+    test: "CBC",
+    result: "",
+    time: "",
+  });
+
+  function getStatus(test, result) {
+    const value = parseFloat(result);
+
+    if (test === "Potassium" && !Number.isNaN(value)) {
+      if (value >= 6) return "Critical";
+      if (value >= 5.3) return "Review";
+      return "Normal";
+    }
+
+    if (test === "Creatinine" && !Number.isNaN(value)) {
+      if (value >= 2) return "Review";
+      return "Normal";
+    }
+
+    return "Normal";
+  }
+
+  function handleAddResult(e) {
+    e.preventDefault();
+
+    if (!form.barcode || !form.mrn || !form.patient || !form.test || !form.result) {
+      alert("Please fill all required fields");
+      return;
+    }
+
+    const status = getStatus(form.test, form.result);
+
+    const newResult = {
+      ...form,
+      time: form.time || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      status,
+      note: "Issued during LIS downtime",
+    };
+
+    setResults((prev) => [newResult, ...prev]);
+    setForm({
+      barcode: "",
+      mrn: "",
+      patient: "",
+      test: "CBC",
+      result: "",
+      time: "",
+    });
+  }
+
+  const filteredResults = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (!q) return results;
+
+    return results.filter((item) =>
+      [item.barcode, item.mrn, item.patient, item.test, item.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [results, search]);
+
+  const criticalCount = results.filter((r) => r.status === "Critical").length;
+  const pendingSyncCount = results.length;
+
+  function badgeStyle(status) {
+    if (status === "Critical") {
+      return {
+        background: "#fee2e2",
+        color: "#b91c1c",
+        border: "1px solid #fecaca",
+      };
+    }
+    if (status === "Review") {
+      return {
+        background: "#fef3c7",
+        color: "#b45309",
+        border: "1px solid #fde68a",
+      };
+    }
+    return {
+      background: "#dcfce7",
+      color: "#166534",
+      border: "1px solid #bbf7d0",
+    };
+  }
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#f8fafc",
+        padding: "24px",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
+        <div
+          style={{
+            background: "white",
+            border: "1px solid #e2e8f0",
+            borderRadius: "20px",
+            padding: "24px",
+            marginBottom: "24px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "16px",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h1 style={{ margin: 0, fontSize: "38px" }}>Zero Downtime Lab Portal</h1>
+              <p style={{ color: "#475569", marginTop: "10px" }}>
+                Internal hospital portal for viewing lab results during LIS downtime
+              </p>
+            </div>
+
+            <div
+              style={{
+                background: "#fef2f2",
+                color: "#b91c1c",
+                border: "1px solid #fecaca",
+                borderRadius: "14px",
+                padding: "12px 16px",
+                fontWeight: "bold",
+              }}
+            >
+              LIS Status: Scheduled Maintenance
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 2fr",
+            gap: "24px",
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              border: "1px solid #e2e8f0",
+              borderRadius: "20px",
+              padding: "24px",
+            }}
+          >
+            <h2 style={{ marginTop: 0 }}>Lab Entry Form</h2>
+            <p style={{ color: "#64748b" }}>Used by laboratory staff during downtime.</p>
+
+            <form onSubmit={handleAddResult}>
+              <div style={{ marginBottom: "12px" }}>
+                <label>Barcode</label>
+                <input
+                  value={form.barcode}
+                  onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+                  style={inputStyle}
+                  placeholder="Scan barcode"
+                />
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label>MRN</label>
+                <input
+                  value={form.mrn}
+                  onChange={(e) => setForm({ ...form, mrn: e.target.value })}
+                  style={inputStyle}
+                  placeholder="Patient MRN"
+                />
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label>Patient Name</label>
+                <input
+                  value={form.patient}
+                  onChange={(e) => setForm({ ...form, patient: e.target.value })}
+                  style={inputStyle}
+                  placeholder="Patient name"
+                />
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label>Test</label>
+                <select
+                  value={form.test}
+                  onChange={(e) => setForm({ ...form, test: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option>CBC</option>
+                  <option>Potassium</option>
+                  <option>Creatinine</option>
+                  <option>Troponin</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label>Result</label>
+                <input
+                  value={form.result}
+                  onChange={(e) => setForm({ ...form, result: e.target.value })}
+                  style={inputStyle}
+                  placeholder="Enter result"
+                />
+              </div>
+
+              <div style={{ marginBottom: "16px" }}>
+                <label>Time</label>
+                <input
+                  value={form.time}
+                  onChange={(e) => setForm({ ...form, time: e.target.value })}
+                  style={inputStyle}
+                  placeholder="10:45"
+                />
+              </div>
+
+              <button type="submit" style={buttonStyle}>
+                Save Downtime Result
+              </button>
+            </form>
+          </div>
+
+          <div
+            style={{
+              background: "white",
+              border: "1px solid #e2e8f0",
+              borderRadius: "20px",
+              padding: "24px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "16px",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <h2 style={{ marginTop: 0, marginBottom: "6px" }}>Doctor View</h2>
+                <p style={{ color: "#64748b", margin: 0 }}>
+                  Search temporary results during LIS downtime
+                </p>
+              </div>
+
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ ...inputStyle, width: "280px", marginBottom: 0 }}
+                placeholder="Search by barcode, MRN, patient..."
+              />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: "12px",
+                marginTop: "20px",
+                marginBottom: "20px",
+              }}
+            >
+              <div style={cardStyle}>
+                <div style={{ color: "#64748b", fontSize: "14px" }}>Results Entered</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold", marginTop: "8px" }}>{results.length}</div>
+              </div>
+
+              <div style={{ ...cardStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                <div style={{ color: "#b91c1c", fontSize: "14px" }}>Critical Alerts</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold", marginTop: "8px", color: "#b91c1c" }}>
+                  {criticalCount}
+                </div>
+              </div>
+
+              <div style={{ ...cardStyle, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+                <div style={{ color: "#1d4ed8", fontSize: "14px" }}>Pending Sync</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold", marginTop: "8px", color: "#1d4ed8" }}>
+                  {pendingSyncCount}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    <th style={thStyle}>Barcode</th>
+                    <th style={thStyle}>MRN</th>
+                    <th style={thStyle}>Patient</th>
+                    <th style={thStyle}>Test</th>
+                    <th style={thStyle}>Result</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={thStyle}>Time</th>
+                    <th style={thStyle}>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredResults.map((item, index) => (
+                    <tr key={index}>
+                      <td style={tdStyle}>{item.barcode}</td>
+                      <td style={tdStyle}>{item.mrn}</td>
+                      <td style={tdStyle}>{item.patient}</td>
+                      <td style={tdStyle}>{item.test}</td>
+                      <td style={tdStyle}>{item.result}</td>
+                      <td style={tdStyle}>
+                        <span
+                          style={{
+                            ...badgeStyle(item.status),
+                            borderRadius: "999px",
+                            padding: "6px 12px",
+                            fontSize: "12px",
+                            fontWeight: "bold",
+                            display: "inline-block",
+                          }}
+                        >
+                          {item.status}
+                        </span>
+                      </td>
+                      <td style={tdStyle}>{item.time}</td>
+                      <td style={tdStyle}>{item.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div
+              style={{
+                marginTop: "20px",
+                background: "#fff7ed",
+                border: "1px solid #fed7aa",
+                borderRadius: "16px",
+                padding: "16px",
+              }}
+            >
+              <strong>AI Safety Layer:</strong> critical and review flags are generated automatically
+              based on simple result rules during downtime.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: "100%",
+  padding: "12px 14px",
+  marginTop: "6px",
+  borderRadius: "12px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+};
+
+const buttonStyle = {
+  width: "100%",
+  padding: "14px",
+  background: "#0f172a",
+  color: "white",
+  border: "none",
+  borderRadius: "12px",
+  fontWeight: "bold",
+  cursor: "pointer",
+};
+
+const cardStyle = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: "16px",
+  padding: "16px",
+};
+
+const thStyle = {
+  textAlign: "left",
+  padding: "12px",
+  borderBottom: "1px solid #e2e8f0",
+};
+
+const tdStyle = {
+  padding: "12px",
+  borderBottom: "1px solid #e2e8f0",
+};
