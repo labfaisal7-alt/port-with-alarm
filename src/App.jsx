@@ -52,6 +52,7 @@ const defaultResults = [
     synced: false,
     source: "Manual Entry",
     createdAt: "2026-04-18 10:32",
+    comment: "Immediate clinician review recommended.",
   },
   {
     id: "res-2",
@@ -68,6 +69,7 @@ const defaultResults = [
     synced: false,
     source: "Scanned Sheet",
     createdAt: "2026-04-18 10:38",
+    comment: "",
   },
 ];
 
@@ -130,6 +132,7 @@ const defaultManualForm = {
   },
   time: "",
   technician: "",
+  comment: "",
 };
 
 const defaultScanForm = {
@@ -145,6 +148,7 @@ const defaultScanForm = {
   filePreview: "",
   fileType: "",
   ocrText: "",
+  comment: "",
 };
 
 const defaultSampleForm = {
@@ -184,6 +188,7 @@ function normalizeResults(data) {
     synced: !!item.synced,
     source: item.source || "Manual Entry",
     createdAt: item.createdAt || "",
+    comment: item.comment || "",
   }));
 }
 
@@ -200,6 +205,23 @@ function normalizeSamples(data) {
     receivedBy: item.receivedBy || "",
     time: item.time || "",
     createdAt: item.createdAt || getNowDateTime(),
+  }));
+}
+
+function normalizeCriticalAlerts(data) {
+  if (!Array.isArray(data)) return [];
+
+  return data.map((item) => ({
+    id: item.id || createId(),
+    resultId: item.resultId || "",
+    mrn: item.mrn || "",
+    patient: item.patient || "",
+    test: item.test || "",
+    result: item.result || "",
+    status: item.status || "Critical",
+    createdAt: item.createdAt || "",
+    acknowledged: !!item.acknowledged,
+    comment: item.comment || "",
   }));
 }
 
@@ -258,8 +280,14 @@ export default function App() {
   );
   const [search, setSearch] = useState("");
   const [entryMode, setEntryMode] = useState(() => safeRead(STORAGE_KEYS.entryMode, "manual"));
-  const [form, setForm] = useState(() => safeRead(STORAGE_KEYS.form, defaultManualForm));
-  const [scanForm, setScanForm] = useState(() => safeRead(STORAGE_KEYS.scanForm, defaultScanForm));
+  const [form, setForm] = useState(() => ({
+    ...defaultManualForm,
+    ...safeRead(STORAGE_KEYS.form, defaultManualForm),
+  }));
+  const [scanForm, setScanForm] = useState(() => ({
+    ...defaultScanForm,
+    ...safeRead(STORAGE_KEYS.scanForm, defaultScanForm),
+  }));
   const [sampleForm, setSampleForm] = useState(() =>
     safeRead(STORAGE_KEYS.sampleForm, defaultSampleForm)
   );
@@ -270,7 +298,7 @@ export default function App() {
     safeRead(STORAGE_KEYS.employees, defaultEmployees)
   );
   const [criticalAlerts, setCriticalAlerts] = useState(() =>
-    safeRead(STORAGE_KEYS.criticalAlerts, [])
+    normalizeCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, []))
   );
   const [employeeForm, setEmployeeForm] = useState({
     name: "",
@@ -280,7 +308,7 @@ export default function App() {
   });
 
   const importInputRef = useRef(null);
-  const lastPlayedAlertRef = useRef(null);
+  const lastPlayedAlertIdsRef = useRef([]);
 
   const canEnterResults = session?.role === "Lab" || session?.role === "All";
   const canReceiveSamples = session?.role === "Reception" || session?.role === "All";
@@ -360,7 +388,7 @@ export default function App() {
   useEffect(() => {
     function handleStorageChange(e) {
       if (e.key === STORAGE_KEYS.criticalAlerts) {
-        setCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, []));
+        setCriticalAlerts(normalizeCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, [])));
       }
 
       if (e.key === STORAGE_KEYS.results) {
@@ -375,11 +403,6 @@ export default function App() {
   const pendingDoctorAlerts = useMemo(() => {
     return criticalAlerts.filter((item) => !item.acknowledged);
   }, [criticalAlerts]);
-
-  const activeDoctorAlert =
-    session?.role === "Doctor" && pendingDoctorAlerts.length > 0
-      ? pendingDoctorAlerts[0]
-      : null;
 
   useEffect(() => {
     function playCriticalAlertSound() {
@@ -414,13 +437,20 @@ export default function App() {
       }
     }
 
-    if (session?.role === "Doctor" && activeDoctorAlert) {
-      if (lastPlayedAlertRef.current !== activeDoctorAlert.id) {
-        lastPlayedAlertRef.current = activeDoctorAlert.id;
-        playCriticalAlertSound();
-      }
+    if (session?.role !== "Doctor") return;
+
+    const newUnheardAlerts = pendingDoctorAlerts.filter(
+      (alertItem) => !lastPlayedAlertIdsRef.current.includes(alertItem.id)
+    );
+
+    if (newUnheardAlerts.length > 0) {
+      playCriticalAlertSound();
+      lastPlayedAlertIdsRef.current = [
+        ...lastPlayedAlertIdsRef.current,
+        ...newUnheardAlerts.map((item) => item.id),
+      ];
     }
-  }, [session, activeDoctorAlert]);
+  }, [session, pendingDoctorAlerts]);
 
   function handleLogin(e) {
     e.preventDefault();
@@ -506,6 +536,7 @@ export default function App() {
     setExtractedData(null);
     setEmployees(defaultEmployees);
     setCriticalAlerts([]);
+    lastPlayedAlertIdsRef.current = [];
     setEmployeeForm({ name: "", username: "", password: "", role: "Lab" });
     setSearch("");
   }
@@ -531,6 +562,7 @@ export default function App() {
       "CreatedAt",
       "Technician",
       "Note",
+      "Comment",
     ];
 
     const rows = results.map((item) => [
@@ -548,6 +580,7 @@ export default function App() {
       item.createdAt,
       item.technician,
       item.note,
+      item.comment,
     ]);
 
     const csvContent = [headers, ...rows]
@@ -626,6 +659,7 @@ export default function App() {
             createdAt: row["createdat"] || getNowDateTime(),
             technician: row["technician"] || "",
             note: row["note"] || "Imported from CSV",
+            comment: row["comment"] || "",
           };
         });
 
@@ -715,6 +749,7 @@ export default function App() {
         patient: sample.patient,
         test: sample.test,
         technician: session.name,
+        comment: "",
       });
       setEntryMode("manual");
       return;
@@ -729,6 +764,7 @@ export default function App() {
       patient: sample.patient,
       test: sample.test,
       technician: session.name,
+      comment: "",
     });
     setExtractedData(null);
     setEntryMode("scan");
@@ -770,19 +806,25 @@ export default function App() {
   }
 
   function createCriticalAlert(resultItem) {
-    const alertItem = {
-      id: createId(),
-      resultId: resultItem.id,
-      mrn: resultItem.mrn,
-      patient: resultItem.patient,
-      test: resultItem.test,
-      result: resultItem.result,
-      status: resultItem.status,
-      createdAt: resultItem.createdAt,
-      acknowledged: false,
-    };
+    setCriticalAlerts((prev) => {
+      const alreadyExists = prev.some((alertItem) => alertItem.resultId === resultItem.id);
+      if (alreadyExists) return prev;
 
-    setCriticalAlerts((prev) => [alertItem, ...prev]);
+      const alertItem = {
+        id: createId(),
+        resultId: resultItem.id,
+        mrn: resultItem.mrn,
+        patient: resultItem.patient,
+        test: resultItem.test,
+        result: resultItem.result,
+        status: resultItem.status,
+        createdAt: resultItem.createdAt,
+        acknowledged: false,
+        comment: resultItem.comment || "",
+      };
+
+      return [alertItem, ...prev];
+    });
   }
 
   function acknowledgeCriticalAlert(alertId) {
@@ -836,6 +878,7 @@ export default function App() {
       synced: false,
       source: "Manual Entry",
       createdAt: getNowDateTime(),
+      comment: form.comment?.trim() || "",
     };
 
     setResults((prev) => [newResult, ...prev]);
@@ -948,6 +991,7 @@ export default function App() {
       synced: false,
       source: "Scanned Sheet",
       createdAt: getNowDateTime(),
+      comment: scanForm.comment?.trim() || "",
     };
 
     setResults((prev) => [newResult, ...prev]);
@@ -1029,6 +1073,7 @@ export default function App() {
             <p><span class="label">Technician:</span> ${item.technician}</p>
             <p><span class="label">Source:</span> ${item.source}</p>
             <p><span class="label">Note:</span> ${item.note}</p>
+            <p><span class="label">Comment:</span> ${item.comment || "-"}</p>
           </div>
 
           <p class="note">Pending official LIS verification if not yet synchronized.</p>
@@ -1132,6 +1177,7 @@ export default function App() {
           item.technician,
           item.source,
           item.createdAt,
+          item.comment,
         ]
           .join(" ")
           .toLowerCase()
@@ -1153,6 +1199,7 @@ export default function App() {
         item.technician,
         item.source,
         item.createdAt,
+        item.comment,
       ]
         .join(" ")
         .toLowerCase()
@@ -1162,6 +1209,7 @@ export default function App() {
 
   const criticalCount = results.filter((r) => r.status === "Critical").length;
   const pendingSyncCount = results.filter((r) => !r.synced).length;
+  const pendingDoctorAlertsCount = pendingDoctorAlerts.length;
 
   function badgeStyle(status) {
     if (status === "Critical") {
@@ -1256,44 +1304,51 @@ export default function App() {
   return (
     <div style={pageStyle}>
       <div style={{ maxWidth: "1450px", margin: "0 auto" }}>
-        {session?.role === "Doctor" && activeDoctorAlert && (
+        {session?.role === "Doctor" && pendingDoctorAlertsCount > 0 && (
           <div style={criticalAlertOverlayStyle}>
             <div style={criticalAlertBoxStyle}>
-              <div style={criticalAlertTitleStyle}>Critical Result Alert</div>
-              <div style={{ color: "#475569", marginBottom: 16 }}>
-                A critical result has been entered and requires doctor attention.
+              <div style={criticalAlertHeaderStyle}>
+                <div>
+                  <div style={criticalAlertTitleStyle}>Critical Results Alerts</div>
+                  <div style={{ color: "#475569", marginTop: 4 }}>
+                    Please review and acknowledge the following critical results.
+                  </div>
+                </div>
+
+                <div style={criticalAlertCounterStyle}>
+                  {pendingDoctorAlertsCount} alert{pendingDoctorAlertsCount > 1 ? "s" : ""}
+                </div>
               </div>
 
-              <div style={criticalAlertDetailsStyle}>
-                <div><strong>MRN:</strong> {activeDoctorAlert.mrn}</div>
-                <div><strong>Patient:</strong> {activeDoctorAlert.patient || "-"}</div>
-                <div><strong>Test:</strong> {activeDoctorAlert.test}</div>
-                <div><strong>Result:</strong> {activeDoctorAlert.result}</div>
-                <div><strong>Time:</strong> {activeDoctorAlert.createdAt || "-"}</div>
-              </div>
+              <div style={criticalAlertListStyle}>
+                {pendingDoctorAlerts.map((alertItem) => (
+                  <div key={alertItem.id} style={criticalAlertItemStyle}>
+                    <div style={criticalAlertItemTopStyle}>
+                      <div style={{ fontWeight: "bold", color: "#7f1d1d", fontSize: 18 }}>
+                        نتيجة حرجة للمريض رقم {alertItem.mrn}
+                      </div>
 
-              <div
-                style={{
-                  marginTop: 16,
-                  background: "#fef2f2",
-                  border: "1px solid #fecaca",
-                  color: "#b91c1c",
-                  borderRadius: 12,
-                  padding: 12,
-                  fontWeight: "bold",
-                }}
-              >
-                critical result for pt MRN {activeDoctorAlert.mrn}
-              </div>
+                      <button
+                        type="button"
+                        style={smallButtonOrange}
+                        onClick={() => acknowledgeCriticalAlert(alertItem.id)}
+                      >
+                        تم الاطلاع
+                      </button>
+                    </div>
 
-              <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  style={smallButtonOrange}
-                  onClick={() => acknowledgeCriticalAlert(activeDoctorAlert.id)}
-                >
-                  إغلاق التنبيه
-                </button>
+                    <div style={criticalAlertDetailsStyle}>
+                      <div><strong>MRN:</strong> {alertItem.mrn}</div>
+                      <div><strong>Patient:</strong> {alertItem.patient || "-"}</div>
+                      <div><strong>Test:</strong> {alertItem.test}</div>
+                      <div><strong>Result:</strong> {alertItem.result}</div>
+                      <div><strong>Time:</strong> {alertItem.createdAt || "-"}</div>
+                      <div>
+                        <strong>Comment:</strong> {alertItem.comment || "-"}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -1812,13 +1867,23 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "16px" }}>
+                  <div style={{ marginBottom: "12px" }}>
                     <label>Technician Name</label>
                     <input
                       value={form.technician}
                       onChange={(e) => setForm({ ...form, technician: e.target.value })}
                       style={inputStyle}
                       placeholder="Technician name"
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: "16px" }}>
+                    <label>Comment / Note (Optional)</label>
+                    <textarea
+                      value={form.comment}
+                      onChange={(e) => setForm({ ...form, comment: e.target.value })}
+                      style={{ ...inputStyle, minHeight: 90, resize: "vertical" }}
+                      placeholder="Add optional comment for the doctor or record..."
                     />
                   </div>
 
@@ -1965,13 +2030,23 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "16px" }}>
+                  <div style={{ marginBottom: "12px" }}>
                     <label>Technician Name</label>
                     <input
                       value={scanForm.technician}
                       onChange={(e) => setScanForm({ ...scanForm, technician: e.target.value })}
                       style={inputStyle}
                       placeholder="Technician name"
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: "16px" }}>
+                    <label>Comment / Note (Optional)</label>
+                    <textarea
+                      value={scanForm.comment}
+                      onChange={(e) => setScanForm({ ...scanForm, comment: e.target.value })}
+                      style={{ ...inputStyle, minHeight: 90, resize: "vertical" }}
+                      placeholder="Add optional comment for the doctor or record..."
                     />
                   </div>
 
@@ -2050,6 +2125,32 @@ export default function App() {
                   }
                 />
               </div>
+
+              {session.role === "Doctor" && (
+                <div
+                  style={{
+                    marginTop: "16px",
+                    marginBottom: "18px",
+                    display: "flex",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ ...cardStyle, minWidth: 220, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                    <div style={{ color: "#b91c1c", fontSize: "14px" }}>Pending Critical Alerts</div>
+                    <div
+                      style={{
+                        fontSize: "28px",
+                        fontWeight: "bold",
+                        marginTop: "8px",
+                        color: "#b91c1c",
+                      }}
+                    >
+                      {pendingDoctorAlertsCount}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {session.role !== "Doctor" && (
                 <div
@@ -2150,6 +2251,7 @@ export default function App() {
                         <th style={thStyle}>Created At</th>
                         <th style={thStyle}>Technician</th>
                         <th style={thStyle}>Note</th>
+                        <th style={thStyle}>Comment</th>
                         <th style={thStyle}>Actions</th>
                       </tr>
                     </thead>
@@ -2195,6 +2297,7 @@ export default function App() {
                           <td style={tdStyle}>{item.createdAt || "-"}</td>
                           <td style={tdStyle}>{item.technician}</td>
                           <td style={tdStyle}>{item.note}</td>
+                          <td style={tdStyle}>{item.comment || "-"}</td>
                           <td style={tdStyle}>
                             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                               {canEnterResults && !item.synced && (
@@ -2566,7 +2669,9 @@ const criticalAlertOverlayStyle = {
 
 const criticalAlertBoxStyle = {
   width: "100%",
-  maxWidth: 560,
+  maxWidth: 760,
+  maxHeight: "85vh",
+  overflowY: "auto",
   background: "#ffffff",
   borderRadius: 24,
   padding: 24,
@@ -2574,11 +2679,51 @@ const criticalAlertBoxStyle = {
   border: "2px solid #fecaca",
 };
 
+const criticalAlertHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 16,
+  marginBottom: 18,
+  flexWrap: "wrap",
+};
+
 const criticalAlertTitleStyle = {
   fontSize: 26,
   fontWeight: "bold",
   color: "#b91c1c",
-  marginBottom: 10,
+};
+
+const criticalAlertCounterStyle = {
+  background: "#fee2e2",
+  color: "#991b1b",
+  border: "1px solid #fecaca",
+  borderRadius: 999,
+  padding: "8px 14px",
+  fontWeight: "bold",
+  fontSize: 14,
+};
+
+const criticalAlertListStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const criticalAlertItemStyle = {
+  background: "#fff7ed",
+  border: "1px solid #fed7aa",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const criticalAlertItemTopStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 16,
+  marginBottom: 12,
+  flexWrap: "wrap",
 };
 
 const criticalAlertDetailsStyle = {
