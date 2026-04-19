@@ -268,6 +268,108 @@ function getNowDateTime() {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function generateBarcodeSVG(value) {
+  const CODE39 = {
+    "0": "nnnwwnwnn",
+    "1": "wnnwnnnnw",
+    "2": "nnwwnnnnw",
+    "3": "wnwwnnnnn",
+    "4": "nnnwwnnnw",
+    "5": "wnnwwnnnn",
+    "6": "nnwwwnnnn",
+    "7": "nnnwnnwnw",
+    "8": "wnnwnnwnn",
+    "9": "nnwwnnwnn",
+    A: "wnnnnwnnw",
+    B: "nnwnnwnnw",
+    C: "wnwnnwnnn",
+    D: "nnnnwwnnw",
+    E: "wnnnwwnnn",
+    F: "nnwnwwnnn",
+    G: "nnnnnwwnw",
+    H: "wnnnnwwnn",
+    I: "nnwnnwwnn",
+    J: "nnnnwwwnn",
+    K: "wnnnnnnww",
+    L: "nnwnnnnww",
+    M: "wnwnnnnwn",
+    N: "nnnnwnnww",
+    O: "wnnnwnnwn",
+    P: "nnwnwnnwn",
+    Q: "nnnnnnwww",
+    R: "wnnnnnwwn",
+    S: "nnwnnnwwn",
+    T: "nnnnwnwwn",
+    U: "wwnnnnnnw",
+    V: "nwwnnnnnw",
+    W: "wwwnnnnnn",
+    X: "nwnnwnnnw",
+    Y: "wwnnwnnnn",
+    Z: "nwwnwnnnn",
+    "-": "nwnnnnwnw",
+    ".": "wwnnnnwnn",
+    " ": "nwwnnnwnn",
+    "*": "nwnnwnwnn",
+    $: "nwnwnwnnn",
+    "/": "nwnwnnnwn",
+    "+": "nwnnnwnwn",
+    "%": "nnnwnwnwn",
+  };
+
+  const safeValue = String(value || "")
+    .toUpperCase()
+    .replace(/[^0-9A-Z .\-/$+%]/g, "-");
+
+  const encoded = `*${safeValue}*`;
+
+  const narrow = 2;
+  const wide = 5;
+  const height = 80;
+  const gap = 2;
+
+  let x = 0;
+  let bars = "";
+
+  for (let c = 0; c < encoded.length; c += 1) {
+    const ch = encoded[c];
+    const pattern = CODE39[ch] || CODE39["-"];
+
+    for (let i = 0; i < pattern.length; i += 1) {
+      const isBar = i % 2 === 0;
+      const width = pattern[i] === "w" ? wide : narrow;
+
+      if (isBar) {
+        bars += `<rect x="${x}" y="0" width="${width}" height="${height}" fill="#000" />`;
+      }
+
+      x += width;
+    }
+
+    if (c < encoded.length - 1) {
+      x += gap;
+    }
+  }
+
+  const totalWidth = x;
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${height + 26}" viewBox="0 0 ${totalWidth} ${height + 26}">
+      ${bars}
+      <text x="${totalWidth / 2}" y="${height + 18}" text-anchor="middle" font-size="16" font-family="Arial, sans-serif" fill="#111">
+        ${escapeHtml(safeValue)}
+      </text>
+    </svg>
+  `;
+}
+
 export default function App() {
   const [session, setSession] = useState(() => safeRead(STORAGE_KEYS.session, null));
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
@@ -393,6 +495,10 @@ export default function App() {
 
       if (e.key === STORAGE_KEYS.results) {
         setResults(normalizeResults(safeRead(STORAGE_KEYS.results, defaultResults)));
+      }
+
+      if (e.key === STORAGE_KEYS.samples) {
+        setSamples(normalizeSamples(safeRead(STORAGE_KEYS.samples, [])));
       }
     }
 
@@ -1032,6 +1138,95 @@ export default function App() {
     );
   }
 
+  function handlePrintSampleBarcode(sample) {
+    const barcodeSvg = generateBarcodeSVG(sample.barcode || sample.mrn || sample.id);
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Sample Barcode Label</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              margin: 0;
+              padding: 20px;
+              background: #f8fafc;
+              color: #0f172a;
+            }
+            .label {
+              width: 420px;
+              border: 2px solid #0f172a;
+              border-radius: 18px;
+              background: #fff;
+              padding: 18px;
+              margin: 0 auto;
+              box-sizing: border-box;
+            }
+            .title {
+              font-size: 20px;
+              font-weight: bold;
+              margin-bottom: 14px;
+              text-align: center;
+            }
+            .barcode-box {
+              border: 1px solid #cbd5e1;
+              border-radius: 12px;
+              padding: 12px;
+              background: #fff;
+              text-align: center;
+              margin-bottom: 16px;
+            }
+            .info-row {
+              margin-bottom: 10px;
+              font-size: 16px;
+            }
+            .label-text {
+              font-weight: bold;
+              color: #475569;
+            }
+            @media print {
+              body {
+                background: #fff;
+                padding: 0;
+              }
+              .label {
+                border: 1px solid #000;
+                border-radius: 0;
+                width: 100%;
+                margin: 0;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="label">
+            <div class="title">Sample Barcode Label</div>
+
+            <div class="barcode-box">
+              ${barcodeSvg}
+            </div>
+
+            <div class="info-row"><span class="label-text">Patient Name:</span> ${escapeHtml(sample.patient || "-")}</div>
+            <div class="info-row"><span class="label-text">MRN:</span> ${escapeHtml(sample.mrn || "-")}</div>
+            <div class="info-row"><span class="label-text">Department:</span> ${escapeHtml(sample.department || "-")}</div>
+            <div class="info-row"><span class="label-text">Barcode:</span> ${escapeHtml(sample.barcode || "-")}</div>
+          </div>
+
+          <script>
+            window.onload = function () {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  }
+
   function handlePrint(item) {
     const reportWindow = window.open("", "_blank");
     reportWindow.document.write(`
@@ -1343,9 +1538,7 @@ export default function App() {
                       <div><strong>Test:</strong> {alertItem.test}</div>
                       <div><strong>Result:</strong> {alertItem.result}</div>
                       <div><strong>Time:</strong> {alertItem.createdAt || "-"}</div>
-                      <div>
-                        <strong>Comment:</strong> {alertItem.comment || "-"}
-                      </div>
+                      <div><strong>Comment:</strong> {alertItem.comment || "-"}</div>
                     </div>
                   </div>
                 ))}
@@ -1634,6 +1827,51 @@ export default function App() {
                   Save Sample Request
                 </button>
               </form>
+
+              <div style={{ marginTop: 24 }}>
+                <h3 style={{ marginBottom: 12 }}>Received Samples</h3>
+
+                {samples.length === 0 ? (
+                  <div style={infoBoxStyle}>No samples saved yet.</div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ background: "#f8fafc" }}>
+                          <th style={thStyle}>Barcode</th>
+                          <th style={thStyle}>MRN</th>
+                          <th style={thStyle}>Department</th>
+                          <th style={thStyle}>Patient</th>
+                          <th style={thStyle}>Test</th>
+                          <th style={thStyle}>Time</th>
+                          <th style={thStyle}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {samples.map((sample) => (
+                          <tr key={sample.id}>
+                            <td style={tdStyle}>{sample.barcode}</td>
+                            <td style={tdStyle}>{sample.mrn}</td>
+                            <td style={tdStyle}>{sample.department || "-"}</td>
+                            <td style={tdStyle}>{sample.patient}</td>
+                            <td style={tdStyle}>{sample.test}</td>
+                            <td style={tdStyle}>{sample.time || "-"}</td>
+                            <td style={tdStyle}>
+                              <button
+                                type="button"
+                                style={smallButtonBlue}
+                                onClick={() => handlePrintSampleBarcode(sample)}
+                              >
+                                Print Barcode
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1686,6 +1924,13 @@ export default function App() {
                                   onClick={() => loadSampleToEntry(sample, "scan")}
                                 >
                                   Load to Scan
+                                </button>
+                                <button
+                                  type="button"
+                                  style={smallButtonGreen}
+                                  onClick={() => handlePrintSampleBarcode(sample)}
+                                >
+                                  Print Barcode
                                 </button>
                               </div>
                             </td>
