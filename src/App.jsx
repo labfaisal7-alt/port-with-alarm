@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   extractedData: "lab_portal_extracted_data",
   employees: "lab_portal_employees",
   criticalAlerts: "lab_portal_critical_alerts",
+  auditLogs: "lab_portal_audit_logs",
 };
 
 const DEPARTMENT_OPTIONS = [
@@ -26,6 +27,18 @@ const DEPARTMENT_OPTIONS = [
   "Other",
 ];
 
+const TEST_OPTIONS = ["CBC", "Potassium", "Creatinine", "Troponin"];
+
+const SAMPLE_STATUS_OPTIONS = [
+  "Received",
+  "In Progress",
+  "Partial Completed",
+  "Completed",
+  "Cancelled",
+];
+
+const RESULT_STATUS_OPTIONS = ["Normal", "Review", "Critical", "Cancelled"];
+
 const HOSPITAL_NAME = "King Salman Armed Forces Hospital";
 const SYSTEM_NAME = "Zero Downtime Lab Portal Prototype";
 
@@ -36,130 +49,22 @@ function createId() {
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-const defaultResults = [
-  {
-    id: "res-1",
-    barcode: "LIS-001",
-    mrn: "MRN-102344",
-    department: "Emergency",
-    patient: "Ahmed",
-    test: "Potassium",
-    result: "6.5",
-    status: "Critical",
-    time: "10:32",
-    note: "Issued during LIS downtime",
-    technician: "Fatimah",
-    synced: false,
-    source: "Manual Entry",
-    createdAt: "2026-04-18 10:32",
-    comment: "Immediate clinician review recommended.",
-  },
-  {
-    id: "res-2",
-    barcode: "LIS-002",
-    mrn: "MRN-102355",
-    department: "ICU",
-    patient: "Sara",
-    test: "CBC",
-    result: "WBC: 8.5 | RBC: 4.7 | Hb: 13.2 | Platelets: 220",
-    status: "Normal",
-    time: "10:38",
-    note: "Queued for LIS reconciliation",
-    technician: "Mona",
-    synced: false,
-    source: "Scanned Sheet",
-    createdAt: "2026-04-18 10:38",
-    comment: "",
-  },
-];
+function getNowTime() {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-const fixedUsers = {
-  admin: {
-    username: "admin",
-    password: "1234",
-    role: "Admin",
-    name: "System Administrator",
-    active: true,
-  },
-  doctor: {
-    username: "doctor",
-    password: "1234",
-    role: "Doctor",
-    name: "Duty Doctor",
-    active: true,
-  },
-  reception: {
-    username: "reception",
-    password: "1234",
-    role: "Reception",
-    name: "Sample Reception Staff",
-    active: true,
-  },
-};
-
-const defaultEmployees = [
-  {
-    id: 1,
-    username: "lab",
-    password: "1234",
-    role: "Lab",
-    name: "Laboratory Staff",
-    active: true,
-  },
-  {
-    id: 2,
-    username: "reception1",
-    password: "1234",
-    role: "Reception",
-    name: "Reception Staff",
-    active: true,
-  },
-];
-
-const defaultManualForm = {
-  requestId: "",
-  barcode: "",
-  mrn: "",
-  department: "",
-  patient: "",
-  test: "CBC",
-  result: "",
-  cbc: {
-    wbc: "",
-    rbc: "",
-    hb: "",
-    platelets: "",
-  },
-  time: "",
-  technician: "",
-  comment: "",
-};
-
-const defaultScanForm = {
-  requestId: "",
-  barcode: "",
-  mrn: "",
-  department: "",
-  patient: "",
-  test: "CBC",
-  time: "",
-  technician: "",
-  fileName: "",
-  filePreview: "",
-  fileType: "",
-  ocrText: "",
-  comment: "",
-};
-
-const defaultSampleForm = {
-  barcode: "",
-  mrn: "",
-  department: "",
-  patient: "",
-  test: "CBC",
-  receivedBy: "",
-  time: "",
-};
+function getNowDateTime() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mi = String(now.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
 
 function safeRead(key, fallback) {
   try {
@@ -170,59 +75,12 @@ function safeRead(key, fallback) {
   }
 }
 
-function normalizeResults(data) {
-  if (!Array.isArray(data)) return defaultResults;
-
-  return data.map((item) => ({
-    id: item.id || createId(),
-    barcode: item.barcode || "",
-    mrn: item.mrn || "",
-    department: item.department || "",
-    patient: item.patient || "",
-    test: item.test || "",
-    result: item.result || "",
-    status: item.status || "Normal",
-    time: item.time || "",
-    note: item.note || "",
-    technician: item.technician || "",
-    synced: !!item.synced,
-    source: item.source || "Manual Entry",
-    createdAt: item.createdAt || "",
-    comment: item.comment || "",
-  }));
-}
-
-function normalizeSamples(data) {
-  if (!Array.isArray(data)) return [];
-
-  return data.map((item) => ({
-    id: item.id || createId(),
-    barcode: item.barcode || "",
-    mrn: item.mrn || "",
-    department: item.department || "",
-    patient: item.patient || "",
-    test: item.test || "CBC",
-    receivedBy: item.receivedBy || "",
-    time: item.time || "",
-    createdAt: item.createdAt || getNowDateTime(),
-  }));
-}
-
-function normalizeCriticalAlerts(data) {
-  if (!Array.isArray(data)) return [];
-
-  return data.map((item) => ({
-    id: item.id || createId(),
-    resultId: item.resultId || "",
-    mrn: item.mrn || "",
-    patient: item.patient || "",
-    test: item.test || "",
-    result: item.result || "",
-    status: item.status || "Critical",
-    createdAt: item.createdAt || "",
-    acknowledged: !!item.acknowledged,
-    comment: item.comment || "",
-  }));
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function parseCSVLine(line) {
@@ -249,31 +107,6 @@ function parseCSVLine(line) {
 
   values.push(current);
   return values;
-}
-
-function getNowTime() {
-  return new Date().toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function getNowDateTime() {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mi = String(now.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function generateBarcodeSVG(value) {
@@ -329,7 +162,6 @@ function generateBarcodeSVG(value) {
     .replace(/[^0-9A-Z .\-/$+%]/g, "-");
 
   const encoded = `*${safeValue}*`;
-
   const narrow = 2;
   const wide = 5;
   const height = 80;
@@ -349,33 +181,191 @@ function generateBarcodeSVG(value) {
       if (isBar) {
         bars += `<rect x="${x}" y="0" width="${width}" height="${height}" fill="#000" />`;
       }
-
       x += width;
     }
 
-    if (c < encoded.length - 1) {
-      x += gap;
-    }
+    if (c < encoded.length - 1) x += gap;
   }
 
   const totalWidth = x;
 
   return `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${height + 26}" viewBox="0 0 ${totalWidth} ${height + 26}">
+    <svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${height + 28}" viewBox="0 0 ${totalWidth} ${height + 28}">
       ${bars}
-      <text x="${totalWidth / 2}" y="${height + 18}" text-anchor="middle" font-size="16" font-family="Arial, sans-serif" fill="#111">
+      <text x="${totalWidth / 2}" y="${height + 20}" text-anchor="middle" font-size="15" font-family="Arial, sans-serif" fill="#111">
         ${escapeHtml(safeValue)}
       </text>
     </svg>
   `;
 }
 
+function getDefaultManualForm() {
+  return {
+    requestId: "",
+    barcode: "",
+    mrn: "",
+    department: "",
+    patient: "",
+    test: "CBC",
+    result: "",
+    cbc: {
+      wbc: "",
+      rbc: "",
+      hb: "",
+      platelets: "",
+    },
+    time: "",
+    technician: "",
+    comment: "",
+  };
+}
+
+function getDefaultScanForm() {
+  return {
+    requestId: "",
+    barcode: "",
+    mrn: "",
+    department: "",
+    patient: "",
+    test: "CBC",
+    time: "",
+    technician: "",
+    fileName: "",
+    filePreview: "",
+    fileType: "",
+    ocrText: "",
+    comment: "",
+  };
+}
+
+function getDefaultSampleForm() {
+  return {
+    barcode: "",
+    mrn: "",
+    department: "",
+    patient: "",
+    tests: ["CBC"],
+    receivedBy: "",
+    time: "",
+  };
+}
+
+function computeSampleStatus(sample) {
+  if (sample.cancelled) return "Cancelled";
+
+  const total = Array.isArray(sample.tests) ? sample.tests.length : 0;
+  const completed = Array.isArray(sample.completedTests) ? sample.completedTests.length : 0;
+
+  if (sample.status === "In Progress" && completed === 0) return "In Progress";
+  if (completed === 0) return "Received";
+  if (completed < total) return "Partial Completed";
+  return "Completed";
+}
+
+function normalizeResults(data) {
+  if (!Array.isArray(data)) return [];
+
+  return data.map((item) => ({
+    id: item.id || createId(),
+    requestId: item.requestId || "",
+    barcode: item.barcode || "",
+    mrn: item.mrn || "",
+    department: item.department || "",
+    patient: item.patient || "",
+    test: item.test || "",
+    result: item.result || "",
+    status: item.status || "Normal",
+    time: item.time || "",
+    note: item.note || "",
+    technician: item.technician || "",
+    synced: !!item.synced,
+    source: item.source || "Manual Entry",
+    createdAt: item.createdAt || "",
+    comment: item.comment || "",
+    cancelled: !!item.cancelled,
+    cancelledBy: item.cancelledBy || "",
+    cancelledAt: item.cancelledAt || "",
+    editedAt: item.editedAt || "",
+    editedBy: item.editedBy || "",
+  }));
+}
+
+function normalizeSamples(data) {
+  if (!Array.isArray(data)) return [];
+
+  return data.map((item) => {
+    const tests = Array.isArray(item.tests)
+      ? item.tests
+      : item.test
+      ? [item.test]
+      : ["CBC"];
+
+    const completedTests = Array.isArray(item.completedTests) ? item.completedTests : [];
+    const base = {
+      id: item.id || createId(),
+      barcode: item.barcode || "",
+      mrn: item.mrn || "",
+      department: item.department || "",
+      patient: item.patient || "",
+      tests,
+      completedTests,
+      receivedBy: item.receivedBy || "",
+      time: item.time || "",
+      createdAt: item.createdAt || getNowDateTime(),
+      status: item.status || "Received",
+      inProgress: !!item.inProgress,
+      cancelled: !!item.cancelled,
+    };
+
+    return {
+      ...base,
+      status: computeSampleStatus(base),
+    };
+  });
+}
+
+function normalizeCriticalAlerts(data) {
+  if (!Array.isArray(data)) return [];
+
+  return data.map((item) => ({
+    id: item.id || createId(),
+    resultId: item.resultId || "",
+    mrn: item.mrn || "",
+    patient: item.patient || "",
+    test: item.test || "",
+    result: item.result || "",
+    status: item.status || "Critical",
+    createdAt: item.createdAt || "",
+    acknowledged: !!item.acknowledged,
+    acknowledgedBy: item.acknowledgedBy || "",
+    acknowledgedAt: item.acknowledgedAt || "",
+    comment: item.comment || "",
+  }));
+}
+
+function normalizeAuditLogs(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => ({
+    id: item.id || createId(),
+    action: item.action || "",
+    actor: item.actor || "",
+    role: item.role || "",
+    details: item.details || "",
+    createdAt: item.createdAt || getNowDateTime(),
+  }));
+}
+
+function uniqueValues(arr) {
+  return [...new Set(arr.filter(Boolean))];
+}
+
 export default function App() {
   const [session, setSession] = useState(() => safeRead(STORAGE_KEYS.session, null));
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [loginError, setLoginError] = useState("");
+
   const [results, setResults] = useState(() =>
-    normalizeResults(safeRead(STORAGE_KEYS.results, defaultResults))
+    normalizeResults(safeRead(STORAGE_KEYS.results, []))
   );
   const [samples, setSamples] = useState(() =>
     normalizeSamples(safeRead(STORAGE_KEYS.samples, []))
@@ -383,25 +373,47 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [entryMode, setEntryMode] = useState(() => safeRead(STORAGE_KEYS.entryMode, "manual"));
   const [form, setForm] = useState(() => ({
-    ...defaultManualForm,
-    ...safeRead(STORAGE_KEYS.form, defaultManualForm),
+    ...getDefaultManualForm(),
+    ...safeRead(STORAGE_KEYS.form, getDefaultManualForm()),
   }));
   const [scanForm, setScanForm] = useState(() => ({
-    ...defaultScanForm,
-    ...safeRead(STORAGE_KEYS.scanForm, defaultScanForm),
+    ...getDefaultScanForm(),
+    ...safeRead(STORAGE_KEYS.scanForm, getDefaultScanForm()),
   }));
-  const [sampleForm, setSampleForm] = useState(() =>
-    safeRead(STORAGE_KEYS.sampleForm, defaultSampleForm)
-  );
+  const [sampleForm, setSampleForm] = useState(() => ({
+    ...getDefaultSampleForm(),
+    ...safeRead(STORAGE_KEYS.sampleForm, getDefaultSampleForm()),
+  }));
   const [extractedData, setExtractedData] = useState(() =>
     safeRead(STORAGE_KEYS.extractedData, null)
   );
   const [employees, setEmployees] = useState(() =>
-    safeRead(STORAGE_KEYS.employees, defaultEmployees)
+    safeRead(STORAGE_KEYS.employees, [
+      {
+        id: 1,
+        username: "lab",
+        password: "1234",
+        role: "Lab",
+        name: "Laboratory Staff",
+        active: true,
+      },
+      {
+        id: 2,
+        username: "reception1",
+        password: "1234",
+        role: "Reception",
+        name: "Reception Staff",
+        active: true,
+      },
+    ])
   );
   const [criticalAlerts, setCriticalAlerts] = useState(() =>
     normalizeCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, []))
   );
+  const [auditLogs, setAuditLogs] = useState(() =>
+    normalizeAuditLogs(safeRead(STORAGE_KEYS.auditLogs, []))
+  );
+
   const [employeeForm, setEmployeeForm] = useState({
     name: "",
     username: "",
@@ -409,12 +421,67 @@ export default function App() {
     role: "Lab",
   });
 
+  const [filters, setFilters] = useState({
+    department: "",
+    test: "",
+    resultStatus: "",
+    syncStatus: "",
+    alertStatus: "",
+    sampleStatus: "",
+  });
+
+  const [editingResultId, setEditingResultId] = useState("");
+  const [editForm, setEditForm] = useState({
+    result: "",
+    comment: "",
+    time: "",
+    note: "",
+  });
+
   const importInputRef = useRef(null);
   const lastPlayedAlertIdsRef = useRef([]);
 
-  const canEnterResults = session?.role === "Lab" || session?.role === "All";
-  const canReceiveSamples = session?.role === "Reception" || session?.role === "All";
+  const fixedUsers = {
+    admin: {
+      username: "admin",
+      password: "1234",
+      role: "Admin",
+      name: "System Administrator",
+      active: true,
+    },
+    doctor: {
+      username: "doctor",
+      password: "1234",
+      role: "Doctor",
+      name: "Duty Doctor",
+      active: true,
+    },
+    reception: {
+      username: "reception",
+      password: "1234",
+      role: "Reception",
+      name: "Sample Reception Staff",
+      active: true,
+    },
+  };
+
+  const canEnterResults = session?.role === "Lab" || session?.role === "All" || session?.role === "Admin";
+  const canReceiveSamples = session?.role === "Reception" || session?.role === "All" || session?.role === "Admin";
   const canViewResultsPanel = session?.role !== "Reception";
+  const canManageResults = session?.role === "Lab" || session?.role === "Admin";
+
+  function addAuditLog(action, details) {
+    if (!session) return;
+    const entry = {
+      id: createId(),
+      action,
+      actor: session.name,
+      role: session.role,
+      details,
+      createdAt: getNowDateTime(),
+    };
+    setAuditLogs((prev) => [entry, ...prev].slice(0, 300));
+  }
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.results, JSON.stringify(results));
@@ -457,6 +524,10 @@ export default function App() {
   }, [criticalAlerts]);
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.auditLogs, JSON.stringify(auditLogs));
+  }, [auditLogs]);
+
+  useEffect(() => {
     if (!session) return;
 
     if (canEnterResults) {
@@ -464,7 +535,6 @@ export default function App() {
         ...prev,
         technician: prev.technician || session.name,
       }));
-
       setScanForm((prev) => ({
         ...prev,
         technician: prev.technician || session.name,
@@ -477,28 +547,27 @@ export default function App() {
         receivedBy: prev.receivedBy || session.name,
       }));
     }
-  }, [canEnterResults, canReceiveSamples, session]);
+  }, [session, canEnterResults, canReceiveSamples]);
 
   useEffect(() => {
     return () => {
-      if (scanForm.filePreview) {
-        URL.revokeObjectURL(scanForm.filePreview);
-      }
+      if (scanForm.filePreview) URL.revokeObjectURL(scanForm.filePreview);
     };
   }, [scanForm.filePreview]);
 
   useEffect(() => {
     function handleStorageChange(e) {
+      if (e.key === STORAGE_KEYS.results) {
+        setResults(normalizeResults(safeRead(STORAGE_KEYS.results, [])));
+      }
+      if (e.key === STORAGE_KEYS.samples) {
+        setSamples(normalizeSamples(safeRead(STORAGE_KEYS.samples, [])));
+      }
       if (e.key === STORAGE_KEYS.criticalAlerts) {
         setCriticalAlerts(normalizeCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, [])));
       }
-
-      if (e.key === STORAGE_KEYS.results) {
-        setResults(normalizeResults(safeRead(STORAGE_KEYS.results, defaultResults)));
-      }
-
-      if (e.key === STORAGE_KEYS.samples) {
-        setSamples(normalizeSamples(safeRead(STORAGE_KEYS.samples, [])));
+      if (e.key === STORAGE_KEYS.auditLogs) {
+        setAuditLogs(normalizeAuditLogs(safeRead(STORAGE_KEYS.auditLogs, [])));
       }
     }
 
@@ -506,23 +575,30 @@ export default function App() {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
-  const pendingDoctorAlerts = useMemo(() => {
-    return criticalAlerts.filter((item) => !item.acknowledged);
+  const alertMapByResultId = useMemo(() => {
+    const map = {};
+    criticalAlerts.forEach((item) => {
+      if (item.resultId) map[item.resultId] = item;
+    });
+    return map;
   }, [criticalAlerts]);
+
+  const pendingDoctorAlerts = useMemo(
+    () => criticalAlerts.filter((item) => !item.acknowledged),
+    [criticalAlerts]
+  );
 
   useEffect(() => {
     function playCriticalAlertSound() {
       try {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if (!AudioContextClass) return;
-
         const audioCtx = new AudioContextClass();
         const notes = [880, 660, 880];
 
         notes.forEach((freq, index) => {
           const osc = audioCtx.createOscillator();
           const gain = audioCtx.createGain();
-
           osc.type = "sine";
           osc.frequency.value = freq;
           osc.connect(gain);
@@ -539,24 +615,78 @@ export default function App() {
           osc.stop(end + 0.02);
         });
       } catch {
-        // ignore audio failure
+        //
       }
     }
 
     if (session?.role !== "Doctor") return;
 
     const newUnheardAlerts = pendingDoctorAlerts.filter(
-      (alertItem) => !lastPlayedAlertIdsRef.current.includes(alertItem.id)
+      (item) => !lastPlayedAlertIdsRef.current.includes(item.id)
     );
 
-    if (newUnheardAlerts.length > 0) {
+    if (newUnheardAlerts.length) {
       playCriticalAlertSound();
       lastPlayedAlertIdsRef.current = [
         ...lastPlayedAlertIdsRef.current,
         ...newUnheardAlerts.map((item) => item.id),
       ];
     }
-  }, [session, pendingDoctorAlerts]);
+  }, [pendingDoctorAlerts, session]);
+
+  function isDuplicateSample(candidate) {
+    const normalizedBarcode = candidate.barcode.trim().toLowerCase();
+    const normalizedMrn = candidate.mrn.trim().toLowerCase();
+    const normalizedTests = uniqueValues(candidate.tests).sort().join("|");
+
+    return samples.some((sample) => {
+      if (sample.cancelled) return false;
+
+      const sameBarcode =
+        normalizedBarcode &&
+        sample.barcode.trim().toLowerCase() === normalizedBarcode;
+
+      const sameMrnAndTests =
+        sample.mrn.trim().toLowerCase() === normalizedMrn &&
+        uniqueValues(sample.tests).sort().join("|") === normalizedTests &&
+        sample.status !== "Completed";
+
+      return sameBarcode || sameMrnAndTests;
+    });
+  }
+
+  function isDuplicateResult(candidate) {
+    return results.some((item) => {
+      if (item.cancelled) return false;
+
+      const sameRequestAndTest =
+        candidate.requestId &&
+        item.requestId === candidate.requestId &&
+        item.test === candidate.test;
+
+      const sameBarcodeMrnTest =
+        item.barcode === candidate.barcode &&
+        item.mrn === candidate.mrn &&
+        item.test === candidate.test &&
+        item.status !== "Cancelled";
+
+      return sameRequestAndTest || sameBarcodeMrnTest;
+    });
+  }
+
+  function updateSampleStatus(sampleId, updates) {
+    setSamples((prev) =>
+      prev.map((sample) => {
+        if (sample.id !== sampleId) return sample;
+        const updated = { ...sample, ...updates };
+        return { ...updated, status: computeSampleStatus(updated) };
+      })
+    );
+  }
+
+  function getRemainingTestsForSample(sample) {
+    return sample.tests.filter((test) => !sample.completedTests.includes(test));
+  }
 
   function handleLogin(e) {
     e.preventDefault();
@@ -609,42 +739,39 @@ export default function App() {
     );
     if (!ok) return;
 
-    if (scanForm.filePreview) {
-      URL.revokeObjectURL(scanForm.filePreview);
-    }
+    if (scanForm.filePreview) URL.revokeObjectURL(scanForm.filePreview);
 
-    localStorage.removeItem(STORAGE_KEYS.results);
-    localStorage.removeItem(STORAGE_KEYS.samples);
-    localStorage.removeItem(STORAGE_KEYS.entryMode);
-    localStorage.removeItem(STORAGE_KEYS.form);
-    localStorage.removeItem(STORAGE_KEYS.scanForm);
-    localStorage.removeItem(STORAGE_KEYS.sampleForm);
-    localStorage.removeItem(STORAGE_KEYS.extractedData);
-    localStorage.removeItem(STORAGE_KEYS.session);
-    localStorage.removeItem(STORAGE_KEYS.employees);
-    localStorage.removeItem(STORAGE_KEYS.criticalAlerts);
+    Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
 
-    setResults(defaultResults);
+    setResults([]);
     setSamples([]);
     setEntryMode("manual");
-    setForm({
-      ...defaultManualForm,
-      technician: canEnterResults && session ? session.name : "",
-    });
-    setScanForm({
-      ...defaultScanForm,
-      technician: canEnterResults && session ? session.name : "",
-    });
-    setSampleForm({
-      ...defaultSampleForm,
-      receivedBy: canReceiveSamples && session ? session.name : "",
-    });
+    setForm({ ...getDefaultManualForm(), technician: session?.name || "" });
+    setScanForm({ ...getDefaultScanForm(), technician: session?.name || "" });
+    setSampleForm({ ...getDefaultSampleForm(), receivedBy: session?.name || "" });
     setExtractedData(null);
-    setEmployees(defaultEmployees);
+    setEmployees([
+      {
+        id: 1,
+        username: "lab",
+        password: "1234",
+        role: "Lab",
+        name: "Laboratory Staff",
+        active: true,
+      },
+      {
+        id: 2,
+        username: "reception1",
+        password: "1234",
+        role: "Reception",
+        name: "Reception Staff",
+        active: true,
+      },
+    ]);
     setCriticalAlerts([]);
-    lastPlayedAlertIdsRef.current = [];
-    setEmployeeForm({ name: "", username: "", password: "", role: "Lab" });
+    setAuditLogs([]);
     setSearch("");
+    lastPlayedAlertIdsRef.current = [];
   }
 
   function handleExportCSV() {
@@ -655,6 +782,7 @@ export default function App() {
 
     const headers = [
       "ID",
+      "RequestID",
       "Barcode",
       "MRN",
       "Department",
@@ -662,6 +790,7 @@ export default function App() {
       "Test",
       "Result",
       "Status",
+      "AlertStatus",
       "Synced",
       "Source",
       "Time",
@@ -669,10 +798,16 @@ export default function App() {
       "Technician",
       "Note",
       "Comment",
+      "Cancelled",
+      "CancelledBy",
+      "CancelledAt",
+      "EditedBy",
+      "EditedAt",
     ];
 
     const rows = results.map((item) => [
       item.id,
+      item.requestId,
       item.barcode,
       item.mrn,
       item.department,
@@ -680,6 +815,13 @@ export default function App() {
       item.test,
       item.result,
       item.status,
+      alertMapByResultId[item.id]
+        ? alertMapByResultId[item.id].acknowledged
+          ? "Acknowledged"
+          : "Pending"
+        : item.status === "Critical"
+        ? "Pending"
+        : "-",
       item.synced ? "Yes" : "No",
       item.source,
       item.time,
@@ -687,24 +829,25 @@ export default function App() {
       item.technician,
       item.note,
       item.comment,
+      item.cancelled ? "Yes" : "No",
+      item.cancelledBy,
+      item.cancelledAt,
+      item.editedBy,
+      item.editedAt,
     ]);
 
     const csvContent = [headers, ...rows]
-      .map((row) =>
-        row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")
-      )
+      .map((row) => row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
       .join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-
     const link = document.createElement("a");
     link.href = url;
     link.setAttribute("download", "downtime_lab_results.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
     URL.revokeObjectURL(url);
   }
 
@@ -733,7 +876,6 @@ export default function App() {
         }
 
         const headers = parseCSVLine(lines[0]).map((h) => h.trim().toLowerCase());
-
         const requiredHeaders = ["barcode", "mrn", "patient", "test", "result"];
         const missingHeaders = requiredHeaders.filter((h) => !headers.includes(h));
 
@@ -744,33 +886,38 @@ export default function App() {
 
         const importedRows = lines.slice(1).map((line) => {
           const cols = parseCSVLine(line);
-
           const row = {};
           headers.forEach((header, index) => {
             row[header] = cols[index] ?? "";
           });
 
           return {
-            id: row["id"] || createId(),
-            barcode: row["barcode"] || "",
-            mrn: row["mrn"] || "",
-            department: row["department"] || "",
-            patient: row["patient"] || "",
-            test: row["test"] || "",
-            result: row["result"] || "",
-            status: row["status"] || "Normal",
-            synced: String(row["synced"] || "").toLowerCase() === "yes",
-            source: row["source"] || "Imported CSV",
-            time: row["time"] || "",
-            createdAt: row["createdat"] || getNowDateTime(),
-            technician: row["technician"] || "",
-            note: row["note"] || "Imported from CSV",
-            comment: row["comment"] || "",
+            id: row.id || createId(),
+            requestId: row.requestid || "",
+            barcode: row.barcode || "",
+            mrn: row.mrn || "",
+            department: row.department || "",
+            patient: row.patient || "",
+            test: row.test || "",
+            result: row.result || "",
+            status: row.status || "Normal",
+            synced: String(row.synced || "").toLowerCase() === "yes",
+            source: row.source || "Imported CSV",
+            time: row.time || "",
+            createdAt: row.createdat || getNowDateTime(),
+            technician: row.technician || "",
+            note: row.note || "Imported from CSV",
+            comment: row.comment || "",
+            cancelled: String(row.cancelled || "").toLowerCase() === "yes",
+            cancelledBy: row.cancelledby || "",
+            cancelledAt: row.cancelledat || "",
+            editedBy: row.editedby || "",
+            editedAt: row.editedat || "",
           };
         });
 
         const validRows = importedRows.filter(
-          (row) => row.barcode || row.mrn || row.department || row.patient || row.test || row.result
+          (row) => row.barcode || row.mrn || row.patient || row.test || row.result
         );
 
         if (!validRows.length) {
@@ -788,22 +935,34 @@ export default function App() {
           setResults((prev) => [...validRows, ...prev]);
         }
 
+        addAuditLog("Results Imported", `${validRows.length} result(s) imported from CSV`);
         alert(`Imported ${validRows.length} result(s) successfully.`);
       } catch {
         alert("Failed to import CSV file");
       } finally {
-        if (importInputRef.current) {
-          importInputRef.current.value = "";
-        }
+        if (importInputRef.current) importInputRef.current.value = "";
       }
     };
 
     reader.readAsText(file);
   }
 
+  function toggleSampleTest(test) {
+    setSampleForm((prev) => {
+      const exists = prev.tests.includes(test);
+      const nextTests = exists
+        ? prev.tests.filter((t) => t !== test)
+        : [...prev.tests, test];
+
+      return {
+        ...prev,
+        tests: nextTests.length ? nextTests : [test],
+      };
+    });
+  }
+
   function handleAddSample(e) {
     e.preventDefault();
-
     if (!canReceiveSamples) return;
 
     if (
@@ -811,8 +970,8 @@ export default function App() {
       !sampleForm.mrn ||
       !sampleForm.department ||
       !sampleForm.patient ||
-      !sampleForm.test ||
-      !sampleForm.receivedBy
+      !sampleForm.receivedBy ||
+      !sampleForm.tests.length
     ) {
       alert("Please fill all required fields");
       return;
@@ -820,24 +979,33 @@ export default function App() {
 
     const newSample = {
       id: createId(),
-      barcode: sampleForm.barcode,
-      mrn: sampleForm.mrn,
+      barcode: sampleForm.barcode.trim(),
+      mrn: sampleForm.mrn.trim(),
       department: sampleForm.department,
-      patient: sampleForm.patient,
-      test: sampleForm.test,
-      receivedBy: sampleForm.receivedBy,
-      time:
-        sampleForm.time ||
-        new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+      patient: sampleForm.patient.trim(),
+      tests: uniqueValues(sampleForm.tests),
+      completedTests: [],
+      receivedBy: sampleForm.receivedBy.trim(),
+      time: sampleForm.time || getNowTime(),
       createdAt: getNowDateTime(),
+      status: "Received",
+      inProgress: false,
+      cancelled: false,
     };
 
+    if (isDuplicateSample(newSample)) {
+      alert("Possible duplicate sample detected. Please review barcode, MRN, or requested tests.");
+      return;
+    }
+
     setSamples((prev) => [newSample, ...prev]);
+    addAuditLog(
+      "Sample Received",
+      `Barcode ${newSample.barcode} | MRN ${newSample.mrn} | Tests: ${newSample.tests.join(", ")}`
+    );
+
     setSampleForm({
-      ...defaultSampleForm,
+      ...getDefaultSampleForm(),
       receivedBy: session.name,
     });
   }
@@ -845,32 +1013,39 @@ export default function App() {
   function loadSampleToEntry(sample, mode = "manual") {
     if (!canEnterResults) return;
 
+    const remainingTests = getRemainingTestsForSample(sample);
+    const selectedTest = remainingTests[0] || sample.tests[0] || "CBC";
+
+    updateSampleStatus(sample.id, { status: "In Progress", inProgress: true });
+    addAuditLog(
+      "Sample Loaded",
+      `Barcode ${sample.barcode} loaded to ${mode} entry for test ${selectedTest}`
+    );
+
     if (mode === "manual") {
       setForm({
-        ...defaultManualForm,
+        ...getDefaultManualForm(),
         requestId: sample.id,
         barcode: sample.barcode,
         mrn: sample.mrn,
         department: sample.department,
         patient: sample.patient,
-        test: sample.test,
+        test: selectedTest,
         technician: session.name,
-        comment: "",
       });
       setEntryMode("manual");
       return;
     }
 
     setScanForm({
-      ...defaultScanForm,
+      ...getDefaultScanForm(),
       requestId: sample.id,
       barcode: sample.barcode,
       mrn: sample.mrn,
       department: sample.department,
       patient: sample.patient,
-      test: sample.test,
+      test: selectedTest,
       technician: session.name,
-      comment: "",
     });
     setExtractedData(null);
     setEntryMode("scan");
@@ -913,10 +1088,10 @@ export default function App() {
 
   function createCriticalAlert(resultItem) {
     setCriticalAlerts((prev) => {
-      const alreadyExists = prev.some((alertItem) => alertItem.resultId === resultItem.id);
-      if (alreadyExists) return prev;
+      const exists = prev.some((item) => item.resultId === resultItem.id);
+      if (exists) return prev;
 
-      const alertItem = {
+      const newAlert = {
         id: createId(),
         resultId: resultItem.id,
         mrn: resultItem.mrn,
@@ -926,24 +1101,68 @@ export default function App() {
         status: resultItem.status,
         createdAt: resultItem.createdAt,
         acknowledged: false,
+        acknowledgedBy: "",
+        acknowledgedAt: "",
         comment: resultItem.comment || "",
       };
-
-      return [alertItem, ...prev];
+      return [newAlert, ...prev];
     });
+
+    addAuditLog(
+      "Critical Alert Created",
+      `MRN ${resultItem.mrn} | ${resultItem.test} | Result ${resultItem.result}`
+    );
   }
 
   function acknowledgeCriticalAlert(alertId) {
+    const alertItem = criticalAlerts.find((item) => item.id === alertId);
     setCriticalAlerts((prev) =>
       prev.map((item) =>
-        item.id === alertId ? { ...item, acknowledged: true } : item
+        item.id === alertId
+          ? {
+              ...item,
+              acknowledged: true,
+              acknowledgedBy: session?.name || "",
+              acknowledgedAt: getNowDateTime(),
+            }
+          : item
       )
+    );
+
+    if (alertItem) {
+      addAuditLog(
+        "Critical Alert Acknowledged",
+        `MRN ${alertItem.mrn} | ${alertItem.test} acknowledged by doctor`
+      );
+    }
+  }
+
+  function registerResultSave(newResult) {
+    setResults((prev) => [newResult, ...prev]);
+
+    if (newResult.status === "Critical") {
+      createCriticalAlert(newResult);
+    }
+
+    if (newResult.requestId) {
+      const targetSample = samples.find((item) => item.id === newResult.requestId);
+      if (targetSample) {
+        const completedTests = uniqueValues([...targetSample.completedTests, newResult.test]);
+        updateSampleStatus(newResult.requestId, {
+          completedTests,
+          inProgress: completedTests.length < targetSample.tests.length,
+        });
+      }
+    }
+
+    addAuditLog(
+      "Result Saved",
+      `MRN ${newResult.mrn} | ${newResult.test} | ${newResult.status}`
     );
   }
 
   function handleAddResult(e) {
     e.preventDefault();
-
     if (!canEnterResults) return;
 
     if (!form.barcode || !form.mrn || !form.department || !form.patient || !form.test || !form.technician) {
@@ -961,44 +1180,46 @@ export default function App() {
       return;
     }
 
-    const status = getStatus(form.test, form.result, form.cbc);
-
     let finalResult = form.result;
-
     if (form.test === "CBC") {
       finalResult = `WBC: ${form.cbc.wbc} | RBC: ${form.cbc.rbc} | Hb: ${form.cbc.hb} | Platelets: ${form.cbc.platelets}`;
     }
 
+    const status = getStatus(form.test, form.result, form.cbc);
+
     const newResult = {
       id: createId(),
-      barcode: form.barcode,
-      mrn: form.mrn,
+      requestId: form.requestId,
+      barcode: form.barcode.trim(),
+      mrn: form.mrn.trim(),
       department: form.department,
-      patient: form.patient,
+      patient: form.patient.trim(),
       test: form.test,
       result: finalResult,
       time: form.time || getNowTime(),
       status,
       note: "Issued during LIS downtime",
-      technician: form.technician,
+      technician: form.technician.trim(),
       synced: false,
       source: "Manual Entry",
       createdAt: getNowDateTime(),
       comment: form.comment?.trim() || "",
+      cancelled: false,
+      cancelledBy: "",
+      cancelledAt: "",
+      editedAt: "",
+      editedBy: "",
     };
 
-    setResults((prev) => [newResult, ...prev]);
-
-    if (newResult.status === "Critical") {
-      createCriticalAlert(newResult);
+    if (isDuplicateResult(newResult)) {
+      alert("Duplicate result detected for the same sample/test.");
+      return;
     }
 
-    if (form.requestId) {
-      setSamples((prev) => prev.filter((item) => item.id !== form.requestId));
-    }
+    registerResultSave(newResult);
 
     setForm({
-      ...defaultManualForm,
+      ...getDefaultManualForm(),
       technician: session.name,
     });
   }
@@ -1084,47 +1305,48 @@ export default function App() {
 
     const newResult = {
       id: createId(),
-      barcode: scanForm.barcode,
-      mrn: scanForm.mrn,
+      requestId: scanForm.requestId,
+      barcode: scanForm.barcode.trim(),
+      mrn: scanForm.mrn.trim(),
       department: scanForm.department,
-      patient: scanForm.patient,
+      patient: scanForm.patient.trim(),
       test: scanForm.test,
       result: extractedData.result,
       time: scanForm.time || getNowTime(),
       status: extractedData.status,
       note: "Extracted from scanned result sheet",
-      technician: scanForm.technician,
+      technician: scanForm.technician.trim(),
       synced: false,
       source: "Scanned Sheet",
       createdAt: getNowDateTime(),
       comment: scanForm.comment?.trim() || "",
+      cancelled: false,
+      cancelledBy: "",
+      cancelledAt: "",
+      editedAt: "",
+      editedBy: "",
     };
 
-    setResults((prev) => [newResult, ...prev]);
-
-    if (newResult.status === "Critical") {
-      createCriticalAlert(newResult);
+    if (isDuplicateResult(newResult)) {
+      alert("Duplicate result detected for the same sample/test.");
+      return;
     }
 
-    if (scanForm.requestId) {
-      setSamples((prev) => prev.filter((item) => item.id !== scanForm.requestId));
-    }
+    registerResultSave(newResult);
 
-    if (scanForm.filePreview) {
-      URL.revokeObjectURL(scanForm.filePreview);
-    }
+    if (scanForm.filePreview) URL.revokeObjectURL(scanForm.filePreview);
 
     setScanForm({
-      ...defaultScanForm,
+      ...getDefaultScanForm(),
       technician: session.name,
     });
-
     setExtractedData(null);
   }
 
   function handleSync(id) {
     if (!canEnterResults) return;
 
+    const target = results.find((item) => item.id === id);
     setResults((prev) =>
       prev.map((item) =>
         item.id === id
@@ -1136,6 +1358,116 @@ export default function App() {
           : item
       )
     );
+
+    if (target) {
+      addAuditLog("Result Marked for LIS Entry", `MRN ${target.mrn} | ${target.test}`);
+    }
+  }
+
+  function startEditResult(item) {
+    setEditingResultId(item.id);
+    setEditForm({
+      result: item.result,
+      comment: item.comment || "",
+      time: item.time || "",
+      note: item.note || "",
+    });
+  }
+
+  function saveEditedResult() {
+    if (!editingResultId) return;
+
+    const target = results.find((item) => item.id === editingResultId);
+    if (!target) return;
+
+    if (!editForm.result.trim()) {
+      alert("Result cannot be empty");
+      return;
+    }
+
+    const updatedResultStatus =
+      target.test === "CBC"
+        ? target.status
+        : getStatus(target.test, editForm.result.trim(), null);
+
+    setResults((prev) =>
+      prev.map((item) =>
+        item.id === editingResultId
+          ? {
+              ...item,
+              result: editForm.result.trim(),
+              comment: editForm.comment.trim(),
+              time: editForm.time.trim(),
+              note: editForm.note.trim(),
+              status: item.test === "CBC" ? item.status : updatedResultStatus,
+              editedAt: getNowDateTime(),
+              editedBy: session.name,
+            }
+          : item
+      )
+    );
+
+    if (updatedResultStatus === "Critical" && target.status !== "Critical") {
+      createCriticalAlert({
+        ...target,
+        result: editForm.result.trim(),
+        comment: editForm.comment.trim(),
+        status: updatedResultStatus,
+        createdAt: target.createdAt,
+      });
+    }
+
+    addAuditLog("Result Edited", `MRN ${target.mrn} | ${target.test}`);
+    setEditingResultId("");
+  }
+
+  function handleCancelResult(item) {
+    if (!canManageResults) return;
+
+    const ok = window.confirm("Cancel this result?");
+    if (!ok) return;
+
+    setResults((prev) =>
+      prev.map((resultItem) =>
+        resultItem.id === item.id
+          ? {
+              ...resultItem,
+              status: "Cancelled",
+              cancelled: true,
+              cancelledBy: session.name,
+              cancelledAt: getNowDateTime(),
+              note: "Result cancelled",
+              synced: false,
+            }
+          : resultItem
+      )
+    );
+
+    if (item.requestId) {
+      const sample = samples.find((s) => s.id === item.requestId);
+      if (sample) {
+        const completedTests = sample.completedTests.filter((t) => t !== item.test);
+        updateSampleStatus(item.requestId, {
+          completedTests,
+          inProgress: false,
+        });
+      }
+    }
+
+    addAuditLog("Result Cancelled", `MRN ${item.mrn} | ${item.test}`);
+  }
+
+  function handleCancelSample(sample) {
+    const ok = window.confirm("Cancel this sample request?");
+    if (!ok) return;
+
+    updateSampleStatus(sample.id, {
+      cancelled: true,
+      status: "Cancelled",
+      inProgress: false,
+    });
+
+    addAuditLog("Sample Cancelled", `Barcode ${sample.barcode} | MRN ${sample.mrn}`);
   }
 
   function handlePrintSampleBarcode(sample) {
@@ -1157,7 +1489,7 @@ export default function App() {
               color: #0f172a;
             }
             .label {
-              width: 420px;
+              width: 440px;
               border: 2px solid #0f172a;
               border-radius: 18px;
               background: #fff;
@@ -1165,11 +1497,20 @@ export default function App() {
               margin: 0 auto;
               box-sizing: border-box;
             }
-            .title {
-              font-size: 20px;
-              font-weight: bold;
-              margin-bottom: 14px;
+            .header {
               text-align: center;
+              margin-bottom: 10px;
+            }
+            .hospital {
+              font-size: 12px;
+              text-transform: uppercase;
+              color: #475569;
+              letter-spacing: 1px;
+            }
+            .title {
+              font-size: 22px;
+              font-weight: bold;
+              margin-top: 6px;
             }
             .barcode-box {
               border: 1px solid #cbd5e1;
@@ -1177,11 +1518,11 @@ export default function App() {
               padding: 12px;
               background: #fff;
               text-align: center;
-              margin-bottom: 16px;
+              margin: 14px 0 16px;
             }
             .info-row {
               margin-bottom: 10px;
-              font-size: 16px;
+              font-size: 15px;
             }
             .label-text {
               font-weight: bold;
@@ -1203,18 +1544,22 @@ export default function App() {
         </head>
         <body>
           <div class="label">
-            <div class="title">Sample Barcode Label</div>
+            <div class="header">
+              <div class="hospital">${escapeHtml(HOSPITAL_NAME)}</div>
+              <div class="title">Sample Barcode Label</div>
+            </div>
 
             <div class="barcode-box">
               ${barcodeSvg}
             </div>
 
-            <div class="info-row"><span class="label-text">Patient Name:</span> ${escapeHtml(sample.patient || "-")}</div>
+            <div class="info-row"><span class="label-text">Patient:</span> ${escapeHtml(sample.patient || "-")}</div>
             <div class="info-row"><span class="label-text">MRN:</span> ${escapeHtml(sample.mrn || "-")}</div>
             <div class="info-row"><span class="label-text">Department:</span> ${escapeHtml(sample.department || "-")}</div>
             <div class="info-row"><span class="label-text">Barcode:</span> ${escapeHtml(sample.barcode || "-")}</div>
+            <div class="info-row"><span class="label-text">Requested Tests:</span> ${escapeHtml((sample.tests || []).join(", ") || "-")}</div>
+            <div class="info-row"><span class="label-text">Status:</span> ${escapeHtml(sample.status || "-")}</div>
           </div>
-
           <script>
             window.onload = function () {
               window.print();
@@ -1225,10 +1570,22 @@ export default function App() {
     `);
 
     printWindow.document.close();
+    addAuditLog("Barcode Printed", `Barcode ${sample.barcode} | MRN ${sample.mrn}`);
   }
 
-  function handlePrint(item) {
+  function handlePrintResult(item) {
     const reportWindow = window.open("", "_blank");
+    if (!reportWindow) return;
+
+    const alertStatus =
+      alertMapByResultId[item.id]
+        ? alertMapByResultId[item.id].acknowledged
+          ? "Acknowledged"
+          : "Pending"
+        : item.status === "Critical"
+        ? "Pending"
+        : "-";
+
     reportWindow.document.write(`
       <html>
         <head>
@@ -1238,7 +1595,6 @@ export default function App() {
             h1 { margin: 0 0 8px 0; font-size: 26px; }
             h2 { margin: 0; font-size: 16px; color: #475569; }
             .top { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
-            .logo { width: 160px; max-height: 72px; object-fit: contain; }
             .box { border: 1px solid #cbd5e1; border-radius: 16px; padding: 20px; margin-top: 20px; }
             .label { color: #475569; font-weight: bold; }
             .note { margin-top: 20px; color: #b45309; }
@@ -1246,31 +1602,28 @@ export default function App() {
         </head>
         <body>
           <div class="top">
-            <img class="logo" src="${window.location.origin}/gov-logos.png" alt="Government Logos" />
             <div>
               <h2>${HOSPITAL_NAME}</h2>
               <h1>${SYSTEM_NAME}</h1>
             </div>
           </div>
-
           <p>This result was issued during LIS downtime.</p>
-
           <div class="box">
-            <p><span class="label">Barcode:</span> ${item.barcode}</p>
-            <p><span class="label">MRN:</span> ${item.mrn}</p>
-            <p><span class="label">Department:</span> ${item.department || "-"}</p>
-            <p><span class="label">Patient:</span> ${item.patient}</p>
-            <p><span class="label">Test:</span> ${item.test}</p>
-            <p><span class="label">Result:</span> ${item.result}</p>
-            <p><span class="label">Status:</span> ${item.status}</p>
-            <p><span class="label">Time:</span> ${item.time}</p>
-            <p><span class="label">Created At:</span> ${item.createdAt || "-"}</p>
-            <p><span class="label">Technician:</span> ${item.technician}</p>
-            <p><span class="label">Source:</span> ${item.source}</p>
-            <p><span class="label">Note:</span> ${item.note}</p>
-            <p><span class="label">Comment:</span> ${item.comment || "-"}</p>
+            <p><span class="label">Barcode:</span> ${escapeHtml(item.barcode)}</p>
+            <p><span class="label">MRN:</span> ${escapeHtml(item.mrn)}</p>
+            <p><span class="label">Department:</span> ${escapeHtml(item.department || "-")}</p>
+            <p><span class="label">Patient:</span> ${escapeHtml(item.patient)}</p>
+            <p><span class="label">Test:</span> ${escapeHtml(item.test)}</p>
+            <p><span class="label">Result:</span> ${escapeHtml(item.result)}</p>
+            <p><span class="label">Status:</span> ${escapeHtml(item.status)}</p>
+            <p><span class="label">Alert Status:</span> ${escapeHtml(alertStatus)}</p>
+            <p><span class="label">Time:</span> ${escapeHtml(item.time)}</p>
+            <p><span class="label">Created At:</span> ${escapeHtml(item.createdAt || "-")}</p>
+            <p><span class="label">Technician:</span> ${escapeHtml(item.technician)}</p>
+            <p><span class="label">Source:</span> ${escapeHtml(item.source)}</p>
+            <p><span class="label">Note:</span> ${escapeHtml(item.note)}</p>
+            <p><span class="label">Comment:</span> ${escapeHtml(item.comment || "-")}</p>
           </div>
-
           <p class="note">Pending official LIS verification if not yet synchronized.</p>
         </body>
       </html>
@@ -1281,7 +1634,6 @@ export default function App() {
 
   function handleAddEmployee(e) {
     e.preventDefault();
-
     if (session?.role !== "Admin") return;
 
     const name = employeeForm.name.trim();
@@ -1315,30 +1667,44 @@ export default function App() {
 
     setEmployees((prev) => [...prev, newEmployee]);
     setEmployeeForm({ name: "", username: "", password: "", role: "Lab" });
+    addAuditLog("Employee Added", `${name} (${role})`);
   }
 
   function handleToggleEmployee(id) {
     if (session?.role !== "Admin") return;
+    const target = employees.find((emp) => emp.id === id);
 
     setEmployees((prev) =>
       prev.map((emp) =>
         emp.id === id ? { ...emp, active: !emp.active } : emp
       )
     );
+
+    if (target) {
+      addAuditLog(
+        target.active ? "Employee Disabled" : "Employee Enabled",
+        `${target.name} (${target.username})`
+      );
+    }
   }
 
   function handleDeleteEmployee(id) {
     if (session?.role !== "Admin") return;
-
+    const target = employees.find((emp) => emp.id === id);
     const ok = window.confirm("Delete this employee?");
     if (!ok) return;
 
     setEmployees((prev) => prev.filter((emp) => emp.id !== id));
+
+    if (target) {
+      addAuditLog("Employee Deleted", `${target.name} (${target.username})`);
+    }
   }
 
   function handleResetEmployeePassword(id) {
     if (session?.role !== "Admin") return;
 
+    const target = employees.find((emp) => emp.id === id);
     const newPassword = window.prompt("Enter new password:");
     if (!newPassword) return;
 
@@ -1347,20 +1713,27 @@ export default function App() {
         emp.id === id ? { ...emp, password: newPassword } : emp
       )
     );
+
+    if (target) {
+      addAuditLog("Employee Password Reset", `${target.name} (${target.username})`);
+    }
   }
+
+  const activeSamples = useMemo(
+    () => samples.filter((item) => item.status !== "Completed" && item.status !== "Cancelled"),
+    [samples]
+  );
 
   const filteredResults = useMemo(() => {
     const q = search.toLowerCase().trim();
 
+    let list = [...results];
+
     if (session?.role === "Doctor") {
       if (!q) return [];
-      return results.filter((item) => item.mrn.toLowerCase().includes(q));
-    }
-
-    if (session?.role === "Admin") {
-      if (!q) return results;
-
-      return results.filter((item) =>
+      list = list.filter((item) => item.mrn.toLowerCase().includes(q));
+    } else if (q) {
+      list = list.filter((item) =>
         [
           item.barcode,
           item.mrn,
@@ -1380,31 +1753,60 @@ export default function App() {
       );
     }
 
-    if (!q) return results;
+    if (filters.department) {
+      list = list.filter((item) => item.department === filters.department);
+    }
+    if (filters.test) {
+      list = list.filter((item) => item.test === filters.test);
+    }
+    if (filters.resultStatus) {
+      list = list.filter((item) => item.status === filters.resultStatus);
+    }
+    if (filters.syncStatus) {
+      list = list.filter((item) =>
+        filters.syncStatus === "Synced" ? item.synced : !item.synced
+      );
+    }
+    if (filters.alertStatus) {
+      list = list.filter((item) => {
+        const alert = alertMapByResultId[item.id];
+        const current =
+          alert
+            ? alert.acknowledged
+              ? "Acknowledged"
+              : "Pending"
+            : item.status === "Critical"
+            ? "Pending"
+            : "None";
+        return current === filters.alertStatus;
+      });
+    }
 
-    return results.filter((item) =>
-      [
-        item.barcode,
-        item.mrn,
-        item.department,
-        item.patient,
-        item.test,
-        item.result,
-        item.status,
-        item.technician,
-        item.source,
-        item.createdAt,
-        item.comment,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [results, search, session]);
+    return list;
+  }, [results, search, session, filters, alertMapByResultId]);
 
-  const criticalCount = results.filter((r) => r.status === "Critical").length;
-  const pendingSyncCount = results.filter((r) => !r.synced).length;
+  const filteredSamples = useMemo(() => {
+    let list = [...samples];
+    if (filters.department) {
+      list = list.filter((item) => item.department === filters.department);
+    }
+    if (filters.sampleStatus) {
+      list = list.filter((item) => item.status === filters.sampleStatus);
+    }
+    if (filters.test) {
+      list = list.filter((item) => item.tests.includes(filters.test));
+    }
+    return list;
+  }, [samples, filters]);
+
+  const criticalCount = results.filter((r) => r.status === "Critical" && !r.cancelled).length;
+  const pendingSyncCount = results.filter((r) => !r.synced && !r.cancelled).length;
   const pendingDoctorAlertsCount = pendingDoctorAlerts.length;
+  const completedSamplesCount = samples.filter((s) => s.status === "Completed").length;
+  const activeSamplesCount = samples.filter(
+    (s) => s.status !== "Completed" && s.status !== "Cancelled"
+  ).length;
+  const auditLogsPreview = auditLogs.slice(0, 12);
 
   function badgeStyle(status) {
     if (status === "Critical") {
@@ -1421,6 +1823,13 @@ export default function App() {
         border: "1px solid #fde68a",
       };
     }
+    if (status === "Cancelled") {
+      return {
+        background: "#e2e8f0",
+        color: "#334155",
+        border: "1px solid #cbd5e1",
+      };
+    }
     return {
       background: "#dcfce7",
       color: "#166534",
@@ -1428,8 +1837,8 @@ export default function App() {
     };
   }
 
-  function syncBadgeStyle(syncedOrActive) {
-    return syncedOrActive
+  function syncBadgeStyle(value) {
+    return value
       ? {
           background: "#dbeafe",
           color: "#1d4ed8",
@@ -1442,12 +1851,23 @@ export default function App() {
         };
   }
 
+  function sampleStatusStyle(status) {
+    if (status === "Received") return badgeStyle("Review");
+    if (status === "In Progress") return syncBadgeStyle(false);
+    if (status === "Partial Completed") return {
+      background: "#ede9fe",
+      color: "#6d28d9",
+      border: "1px solid #ddd6fe",
+    };
+    if (status === "Completed") return badgeStyle("Normal");
+    return badgeStyle("Cancelled");
+  }
+
   if (!session) {
     return (
       <div style={loginPageStyle}>
         <div style={loginCardStyle}>
           <div style={loginHeaderStyle}>
-            <img src="/gov-logos.png" alt="Government Logos" style={loginLogoStyle} />
             <div style={{ flex: 1 }}>
               <div style={loginHospitalNameStyle}>{HOSPITAL_NAME}</div>
               <h1 style={loginTitleStyle}>{SYSTEM_NAME}</h1>
@@ -1498,8 +1918,8 @@ export default function App() {
 
   return (
     <div style={pageStyle}>
-      <div style={{ maxWidth: "1450px", margin: "0 auto" }}>
-        {session?.role === "Doctor" && pendingDoctorAlertsCount > 0 && (
+      <div style={{ maxWidth: "1550px", margin: "0 auto" }}>
+        {session.role === "Doctor" && pendingDoctorAlertsCount > 0 && (
           <div style={criticalAlertOverlayStyle}>
             <div style={criticalAlertBoxStyle}>
               <div style={criticalAlertHeaderStyle}>
@@ -1509,7 +1929,6 @@ export default function App() {
                     Please review and acknowledge the following critical results.
                   </div>
                 </div>
-
                 <div style={criticalAlertCounterStyle}>
                   {pendingDoctorAlertsCount} alert{pendingDoctorAlertsCount > 1 ? "s" : ""}
                 </div>
@@ -1522,7 +1941,6 @@ export default function App() {
                       <div style={{ fontWeight: "bold", color: "#7f1d1d", fontSize: 18 }}>
                         نتيجة حرجة للمريض رقم {alertItem.mrn}
                       </div>
-
                       <button
                         type="button"
                         style={smallButtonOrange}
@@ -1557,17 +1975,11 @@ export default function App() {
               flexWrap: "wrap",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
-              <div style={topLogoBoxStyle}>
-                <img src="/gov-logos.png" alt="Government Logos" style={topLogoStyle} />
-              </div>
-
-              <div>
-                <div style={topHospitalNameStyle}>{HOSPITAL_NAME}</div>
-                <h1 style={topSystemNameStyle}>{SYSTEM_NAME}</h1>
-                <div style={topSubTextStyle}>
-                  Prototype workflow for temporary reporting during LIS downtime
-                </div>
+            <div>
+              <div style={topHospitalNameStyle}>{HOSPITAL_NAME}</div>
+              <h1 style={topSystemNameStyle}>{SYSTEM_NAME}</h1>
+              <div style={topSubTextStyle}>
+                Prototype workflow for temporary reporting during LIS downtime
               </div>
             </div>
 
@@ -1594,11 +2006,148 @@ export default function App() {
           </div>
         </div>
 
+        {(session.role === "Admin" || canViewResultsPanel) && (
+          <div style={{ ...panelStyle, marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+              <div>
+                <h2 style={{ marginTop: 0, marginBottom: 6 }}>
+                  {session.role === "Admin" ? "Admin Dashboard" : "Filters & Overview"}
+                </h2>
+                <p style={{ color: "#64748b", margin: 0 }}>
+                  Quick monitoring cards and advanced filters.
+                </p>
+              </div>
+
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ ...inputStyle, width: 300, marginBottom: 0 }}
+                placeholder={
+                  session.role === "Doctor"
+                    ? "Search by patient MRN only..."
+                    : "Search by barcode, MRN, patient, test..."
+                }
+              />
+            </div>
+
+            <div style={dashboardGridStyle}>
+              <div style={cardStyle}>
+                <div style={metricLabelStyle}>Total Samples</div>
+                <div style={metricValueStyle}>{samples.length}</div>
+              </div>
+              <div style={cardStyle}>
+                <div style={metricLabelStyle}>Active Samples</div>
+                <div style={metricValueStyle}>{activeSamplesCount}</div>
+              </div>
+              <div style={cardStyle}>
+                <div style={metricLabelStyle}>Completed Samples</div>
+                <div style={metricValueStyle}>{completedSamplesCount}</div>
+              </div>
+              <div style={{ ...cardStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                <div style={{ ...metricLabelStyle, color: "#b91c1c" }}>Critical Results</div>
+                <div style={{ ...metricValueStyle, color: "#b91c1c" }}>{criticalCount}</div>
+              </div>
+              <div style={{ ...cardStyle, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+                <div style={{ ...metricLabelStyle, color: "#1d4ed8" }}>Pending Reconciliation</div>
+                <div style={{ ...metricValueStyle, color: "#1d4ed8" }}>{pendingSyncCount}</div>
+              </div>
+              <div style={{ ...cardStyle, background: "#fff7ed", border: "1px solid #fed7aa" }}>
+                <div style={{ ...metricLabelStyle, color: "#c2410c" }}>Pending Doctor Alerts</div>
+                <div style={{ ...metricValueStyle, color: "#c2410c" }}>{pendingDoctorAlertsCount}</div>
+              </div>
+            </div>
+
+            <div style={filtersGridStyle}>
+              <div>
+                <label>Department</label>
+                <select
+                  value={filters.department}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, department: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="">All</option>
+                  {DEPARTMENT_OPTIONS.map((department) => (
+                    <option key={department} value={department}>{department}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Test</label>
+                <select
+                  value={filters.test}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, test: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="">All</option>
+                  {TEST_OPTIONS.map((test) => (
+                    <option key={test} value={test}>{test}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Result Status</label>
+                <select
+                  value={filters.resultStatus}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, resultStatus: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="">All</option>
+                  {RESULT_STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Sync</label>
+                <select
+                  value={filters.syncStatus}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, syncStatus: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="">All</option>
+                  <option value="Synced">Synced</option>
+                  <option value="Pending">Pending</option>
+                </select>
+              </div>
+
+              <div>
+                <label>Alert Status</label>
+                <select
+                  value={filters.alertStatus}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, alertStatus: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="">All</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Acknowledged">Acknowledged</option>
+                  <option value="None">None</option>
+                </select>
+              </div>
+
+              <div>
+                <label>Sample Status</label>
+                <select
+                  value={filters.sampleStatus}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, sampleStatus: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="">All</option>
+                  {SAMPLE_STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div
           style={{
             display: "grid",
-            gridTemplateColumns:
-              canEnterResults || session.role === "Admin" ? "1.2fr 2fr" : "1fr",
+            gridTemplateColumns: canEnterResults || session.role === "Admin" ? "1.2fr 2fr" : "1fr",
             gap: "24px",
           }}
         >
@@ -1606,7 +2155,7 @@ export default function App() {
             <div style={panelStyle}>
               <h2 style={{ marginTop: 0 }}>Admin Panel</h2>
               <p style={{ color: "#64748b" }}>
-                Prototype controls for demonstrating staff roles and access flow.
+                Manage employees and review recent system activity.
               </p>
 
               <form onSubmit={handleAddEmployee}>
@@ -1614,9 +2163,7 @@ export default function App() {
                   <label>Employee Name</label>
                   <input
                     value={employeeForm.name}
-                    onChange={(e) =>
-                      setEmployeeForm({ ...employeeForm, name: e.target.value })
-                    }
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, name: e.target.value })}
                     style={inputStyle}
                     placeholder="Employee full name"
                   />
@@ -1626,9 +2173,7 @@ export default function App() {
                   <label>Username</label>
                   <input
                     value={employeeForm.username}
-                    onChange={(e) =>
-                      setEmployeeForm({ ...employeeForm, username: e.target.value })
-                    }
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, username: e.target.value })}
                     style={inputStyle}
                     placeholder="Username"
                   />
@@ -1638,9 +2183,7 @@ export default function App() {
                   <label>Password</label>
                   <input
                     value={employeeForm.password}
-                    onChange={(e) =>
-                      setEmployeeForm({ ...employeeForm, password: e.target.value })
-                    }
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, password: e.target.value })}
                     style={inputStyle}
                     placeholder="Password"
                   />
@@ -1650,9 +2193,7 @@ export default function App() {
                   <label>Role</label>
                   <select
                     value={employeeForm.role}
-                    onChange={(e) =>
-                      setEmployeeForm({ ...employeeForm, role: e.target.value })
-                    }
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, role: e.target.value })}
                     style={inputStyle}
                   >
                     <option value="Lab">Lab</option>
@@ -1661,13 +2202,11 @@ export default function App() {
                   </select>
                 </div>
 
-                <button type="submit" style={buttonStyleInline}>
-                  Add Employee
-                </button>
+                <button type="submit" style={buttonStyleInline}>Add Employee</button>
               </form>
 
               <div style={{ marginTop: 24 }}>
-                <h3>Lab Employees</h3>
+                <h3>Employees</h3>
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
@@ -1686,42 +2225,19 @@ export default function App() {
                           <td style={tdStyle}>{emp.username}</td>
                           <td style={tdStyle}>{emp.role}</td>
                           <td style={tdStyle}>
-                            <span
-                              style={{
-                                ...syncBadgeStyle(emp.active),
-                                borderRadius: "999px",
-                                padding: "6px 12px",
-                                fontSize: "12px",
-                                fontWeight: "bold",
-                                display: "inline-block",
-                              }}
-                            >
+                            <span style={{ ...syncBadgeStyle(emp.active), borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: "bold", display: "inline-block" }}>
                               {emp.active ? "Active" : "Disabled"}
                             </span>
                           </td>
                           <td style={tdStyle}>
-                            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                              <button
-                                type="button"
-                                style={smallButtonBlue}
-                                onClick={() => handleToggleEmployee(emp.id)}
-                              >
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button type="button" style={smallButtonBlue} onClick={() => handleToggleEmployee(emp.id)}>
                                 {emp.active ? "Disable" : "Enable"}
                               </button>
-
-                              <button
-                                type="button"
-                                style={smallButtonPurple}
-                                onClick={() => handleResetEmployeePassword(emp.id)}
-                              >
+                              <button type="button" style={smallButtonPurple} onClick={() => handleResetEmployeePassword(emp.id)}>
                                 Reset Password
                               </button>
-
-                              <button
-                                type="button"
-                                style={smallButtonOrange}
-                                onClick={() => handleDeleteEmployee(emp.id)}
-                              >
+                              <button type="button" style={smallButtonOrange} onClick={() => handleDeleteEmployee(emp.id)}>
                                 Delete
                               </button>
                             </div>
@@ -1732,6 +2248,25 @@ export default function App() {
                   </table>
                 </div>
               </div>
+
+              <div style={{ marginTop: 24 }}>
+                <h3>Recent Audit Trail</h3>
+                {auditLogsPreview.length === 0 ? (
+                  <div style={infoBoxStyle}>No activity yet.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {auditLogsPreview.map((log) => (
+                      <div key={log.id} style={auditCardStyle}>
+                        <div style={{ fontWeight: "bold" }}>{log.action}</div>
+                        <div style={{ color: "#475569", marginTop: 4 }}>{log.details}</div>
+                        <div style={{ color: "#64748b", fontSize: 13, marginTop: 6 }}>
+                          {log.actor} ({log.role}) • {log.createdAt}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1739,11 +2274,11 @@ export default function App() {
             <div style={panelStyle}>
               <h2 style={{ marginTop: 0 }}>Sample Reception Entry</h2>
               <p style={{ color: "#64748b" }}>
-                Enter the sample details and requested test only. Results are completed later by the laboratory team.
+                Register the patient and requested tests. Multiple tests can be selected for the same request.
               </p>
 
               <form onSubmit={handleAddSample}>
-                <div style={{ marginBottom: "12px" }}>
+                <div style={{ marginBottom: 12 }}>
                   <label>Barcode</label>
                   <input
                     value={sampleForm.barcode}
@@ -1753,7 +2288,7 @@ export default function App() {
                   />
                 </div>
 
-                <div style={{ marginBottom: "12px" }}>
+                <div style={{ marginBottom: 12 }}>
                   <label>MRN</label>
                   <input
                     value={sampleForm.mrn}
@@ -1763,7 +2298,7 @@ export default function App() {
                   />
                 </div>
 
-                <div style={{ marginBottom: "12px" }}>
+                <div style={{ marginBottom: 12 }}>
                   <label>Department</label>
                   <select
                     value={sampleForm.department}
@@ -1772,14 +2307,12 @@ export default function App() {
                   >
                     <option value="">Select department</option>
                     {DEPARTMENT_OPTIONS.map((department) => (
-                      <option key={department} value={department}>
-                        {department}
-                      </option>
+                      <option key={department} value={department}>{department}</option>
                     ))}
                   </select>
                 </div>
 
-                <div style={{ marginBottom: "12px" }}>
+                <div style={{ marginBottom: 12 }}>
                   <label>Patient Name</label>
                   <input
                     value={sampleForm.patient}
@@ -1789,21 +2322,23 @@ export default function App() {
                   />
                 </div>
 
-                <div style={{ marginBottom: "12px" }}>
-                  <label>Requested Test</label>
-                  <select
-                    value={sampleForm.test}
-                    onChange={(e) => setSampleForm({ ...sampleForm, test: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option>CBC</option>
-                    <option>Potassium</option>
-                    <option>Creatinine</option>
-                    <option>Troponin</option>
-                  </select>
+                <div style={{ marginBottom: 12 }}>
+                  <label>Requested Tests</label>
+                  <div style={checkboxGridStyle}>
+                    {TEST_OPTIONS.map((test) => (
+                      <label key={test} style={checkboxItemStyle}>
+                        <input
+                          type="checkbox"
+                          checked={sampleForm.tests.includes(test)}
+                          onChange={() => toggleSampleTest(test)}
+                        />
+                        <span>{test}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
 
-                <div style={{ marginBottom: "12px" }}>
+                <div style={{ marginBottom: 12 }}>
                   <label>Received Time</label>
                   <input
                     value={sampleForm.time}
@@ -1813,7 +2348,7 @@ export default function App() {
                   />
                 </div>
 
-                <div style={{ marginBottom: "16px" }}>
+                <div style={{ marginBottom: 16 }}>
                   <label>Received By</label>
                   <input
                     value={sampleForm.receivedBy}
@@ -1823,16 +2358,13 @@ export default function App() {
                   />
                 </div>
 
-                <button type="submit" style={buttonStyle}>
-                  Save Sample Request
-                </button>
+                <button type="submit" style={buttonStyle}>Save Sample Request</button>
               </form>
 
               <div style={{ marginTop: 24 }}>
-                <h3 style={{ marginBottom: 12 }}>Received Samples</h3>
-
-                {samples.length === 0 ? (
-                  <div style={infoBoxStyle}>No samples saved yet.</div>
+                <h3 style={{ marginBottom: 12 }}>Samples</h3>
+                {filteredSamples.length === 0 ? (
+                  <div style={infoBoxStyle}>No samples found.</div>
                 ) : (
                   <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1842,28 +2374,35 @@ export default function App() {
                           <th style={thStyle}>MRN</th>
                           <th style={thStyle}>Department</th>
                           <th style={thStyle}>Patient</th>
-                          <th style={thStyle}>Test</th>
-                          <th style={thStyle}>Time</th>
+                          <th style={thStyle}>Tests</th>
+                          <th style={thStyle}>Status</th>
                           <th style={thStyle}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {samples.map((sample) => (
+                        {filteredSamples.map((sample) => (
                           <tr key={sample.id}>
                             <td style={tdStyle}>{sample.barcode}</td>
                             <td style={tdStyle}>{sample.mrn}</td>
                             <td style={tdStyle}>{sample.department || "-"}</td>
                             <td style={tdStyle}>{sample.patient}</td>
-                            <td style={tdStyle}>{sample.test}</td>
-                            <td style={tdStyle}>{sample.time || "-"}</td>
+                            <td style={tdStyle}>{sample.tests.join(", ")}</td>
                             <td style={tdStyle}>
-                              <button
-                                type="button"
-                                style={smallButtonBlue}
-                                onClick={() => handlePrintSampleBarcode(sample)}
-                              >
-                                Print Barcode
-                              </button>
+                              <span style={{ ...sampleStatusStyle(sample.status), borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: "bold", display: "inline-block" }}>
+                                {sample.status}
+                              </span>
+                            </td>
+                            <td style={tdStyle}>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button type="button" style={smallButtonBlue} onClick={() => handlePrintSampleBarcode(sample)}>
+                                  Print Barcode
+                                </button>
+                                {sample.status !== "Completed" && sample.status !== "Cancelled" && (
+                                  <button type="button" style={smallButtonOrange} onClick={() => handleCancelSample(sample)}>
+                                    Cancel Sample
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1883,9 +2422,9 @@ export default function App() {
               </p>
 
               <div style={{ ...infoBoxStyle, marginBottom: 18 }}>
-                <div style={{ fontWeight: "bold", marginBottom: 8 }}>Samples Received From Reception</div>
-                {samples.length === 0 ? (
-                  <div style={{ color: "#64748b" }}>No pending samples from reception.</div>
+                <div style={{ fontWeight: "bold", marginBottom: 8 }}>Pending Samples</div>
+                {activeSamples.length === 0 ? (
+                  <div style={{ color: "#64748b" }}>No active samples.</div>
                 ) : (
                   <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1895,41 +2434,35 @@ export default function App() {
                           <th style={thStyle}>MRN</th>
                           <th style={thStyle}>Department</th>
                           <th style={thStyle}>Patient</th>
-                          <th style={thStyle}>Test</th>
-                          <th style={thStyle}>Received By</th>
+                          <th style={thStyle}>Tests</th>
+                          <th style={thStyle}>Remaining</th>
+                          <th style={thStyle}>Status</th>
                           <th style={thStyle}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {samples.map((sample) => (
+                        {activeSamples.map((sample) => (
                           <tr key={sample.id}>
                             <td style={tdStyle}>{sample.barcode}</td>
                             <td style={tdStyle}>{sample.mrn}</td>
                             <td style={tdStyle}>{sample.department || "-"}</td>
                             <td style={tdStyle}>{sample.patient}</td>
-                            <td style={tdStyle}>{sample.test}</td>
-                            <td style={tdStyle}>{sample.receivedBy || "-"}</td>
+                            <td style={tdStyle}>{sample.tests.join(", ")}</td>
+                            <td style={tdStyle}>{getRemainingTestsForSample(sample).join(", ") || "-"}</td>
+                            <td style={tdStyle}>
+                              <span style={{ ...sampleStatusStyle(sample.status), borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: "bold", display: "inline-block" }}>
+                                {sample.status}
+                              </span>
+                            </td>
                             <td style={tdStyle}>
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                <button
-                                  type="button"
-                                  style={smallButtonBlue}
-                                  onClick={() => loadSampleToEntry(sample, "manual")}
-                                >
+                                <button type="button" style={smallButtonBlue} onClick={() => loadSampleToEntry(sample, "manual")}>
                                   Load to Manual
                                 </button>
-                                <button
-                                  type="button"
-                                  style={smallButtonPurple}
-                                  onClick={() => loadSampleToEntry(sample, "scan")}
-                                >
+                                <button type="button" style={smallButtonPurple} onClick={() => loadSampleToEntry(sample, "scan")}>
                                   Load to Scan
                                 </button>
-                                <button
-                                  type="button"
-                                  style={smallButtonGreen}
-                                  onClick={() => handlePrintSampleBarcode(sample)}
-                                >
+                                <button type="button" style={smallButtonGreen} onClick={() => handlePrintSampleBarcode(sample)}>
                                   Print Barcode
                                 </button>
                               </div>
@@ -1943,18 +2476,10 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-                <button
-                  type="button"
-                  onClick={() => setEntryMode("manual")}
-                  style={entryMode === "manual" ? activeTabStyle : inactiveTabStyle}
-                >
+                <button type="button" onClick={() => setEntryMode("manual")} style={entryMode === "manual" ? activeTabStyle : inactiveTabStyle}>
                   Manual Entry
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setEntryMode("scan")}
-                  style={entryMode === "scan" ? activeTabStyle : inactiveTabStyle}
-                >
+                <button type="button" onClick={() => setEntryMode("scan")} style={entryMode === "scan" ? activeTabStyle : inactiveTabStyle}>
                   Scan Result Sheet
                 </button>
               </div>
@@ -1963,10 +2488,11 @@ export default function App() {
                 <form onSubmit={handleAddResult}>
                   {form.requestId && (
                     <div style={{ ...reviewCardStyle, marginBottom: 16 }}>
-                      Loaded sample from reception. Completing this result will remove it from the pending sample list.
+                      Loaded sample from reception. Saving a result will update the sample status instead of deleting the request.
                     </div>
                   )}
-                  <div style={{ marginBottom: "12px" }}>
+
+                  <div style={{ marginBottom: 12 }}>
                     <label>Barcode</label>
                     <input
                       value={form.barcode}
@@ -1976,7 +2502,7 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>MRN</label>
                     <input
                       value={form.mrn}
@@ -1986,7 +2512,7 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Department</label>
                     <select
                       value={form.department}
@@ -1995,14 +2521,12 @@ export default function App() {
                     >
                       <option value="">Select department</option>
                       {DEPARTMENT_OPTIONS.map((department) => (
-                        <option key={department} value={department}>
-                          {department}
-                        </option>
+                        <option key={department} value={department}>{department}</option>
                       ))}
                     </select>
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Patient Name</label>
                     <input
                       value={form.patient}
@@ -2012,7 +2536,7 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Test</label>
                     <select
                       value={form.test}
@@ -2021,77 +2545,30 @@ export default function App() {
                           ...form,
                           test: e.target.value,
                           result: "",
-                          cbc: {
-                            wbc: "",
-                            rbc: "",
-                            hb: "",
-                            platelets: "",
-                          },
+                          cbc: { wbc: "", rbc: "", hb: "", platelets: "" },
                         })
                       }
                       style={inputStyle}
                     >
-                      <option>CBC</option>
-                      <option>Potassium</option>
-                      <option>Creatinine</option>
-                      <option>Troponin</option>
+                      {(form.requestId
+                        ? getRemainingTestsForSample(samples.find((s) => s.id === form.requestId) || { tests: TEST_OPTIONS, completedTests: [] })
+                        : TEST_OPTIONS
+                      ).map((test) => (
+                        <option key={test} value={test}>{test}</option>
+                      ))}
                     </select>
                   </div>
 
                   {form.test === "CBC" ? (
-                    <div style={{ marginBottom: "12px" }}>
+                    <div style={{ marginBottom: 12 }}>
                       <label>CBC Panel</label>
-
-                      <input
-                        value={form.cbc.wbc}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            cbc: { ...form.cbc, wbc: e.target.value },
-                          })
-                        }
-                        style={inputStyle}
-                        placeholder="WBC"
-                      />
-
-                      <input
-                        value={form.cbc.rbc}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            cbc: { ...form.cbc, rbc: e.target.value },
-                          })
-                        }
-                        style={{ ...inputStyle, marginTop: "10px" }}
-                        placeholder="RBC"
-                      />
-
-                      <input
-                        value={form.cbc.hb}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            cbc: { ...form.cbc, hb: e.target.value },
-                          })
-                        }
-                        style={{ ...inputStyle, marginTop: "10px" }}
-                        placeholder="Hb"
-                      />
-
-                      <input
-                        value={form.cbc.platelets}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            cbc: { ...form.cbc, platelets: e.target.value },
-                          })
-                        }
-                        style={{ ...inputStyle, marginTop: "10px" }}
-                        placeholder="Platelets"
-                      />
+                      <input value={form.cbc.wbc} onChange={(e) => setForm({ ...form, cbc: { ...form.cbc, wbc: e.target.value } })} style={inputStyle} placeholder="WBC" />
+                      <input value={form.cbc.rbc} onChange={(e) => setForm({ ...form, cbc: { ...form.cbc, rbc: e.target.value } })} style={{ ...inputStyle, marginTop: 10 }} placeholder="RBC" />
+                      <input value={form.cbc.hb} onChange={(e) => setForm({ ...form, cbc: { ...form.cbc, hb: e.target.value } })} style={{ ...inputStyle, marginTop: 10 }} placeholder="Hb" />
+                      <input value={form.cbc.platelets} onChange={(e) => setForm({ ...form, cbc: { ...form.cbc, platelets: e.target.value } })} style={{ ...inputStyle, marginTop: 10 }} placeholder="Platelets" />
                     </div>
                   ) : (
-                    <div style={{ marginBottom: "12px" }}>
+                    <div style={{ marginBottom: 12 }}>
                       <label>Result</label>
                       <input
                         value={form.result}
@@ -2102,7 +2579,7 @@ export default function App() {
                     </div>
                   )}
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Time</label>
                     <input
                       value={form.time}
@@ -2112,7 +2589,7 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Technician Name</label>
                     <input
                       value={form.technician}
@@ -2122,7 +2599,7 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "16px" }}>
+                  <div style={{ marginBottom: 16 }}>
                     <label>Comment / Note (Optional)</label>
                     <textarea
                       value={form.comment}
@@ -2132,64 +2609,42 @@ export default function App() {
                     />
                   </div>
 
-                  <button type="submit" style={buttonStyle}>
-                    Save Manual Result
-                  </button>
+                  <button type="submit" style={buttonStyle}>Save Manual Result</button>
                 </form>
               ) : (
                 <div>
                   {scanForm.requestId && (
                     <div style={{ ...reviewCardStyle, marginBottom: 16 }}>
-                      Loaded sample from reception. Saving the scanned result will remove it from the pending sample list.
+                      Loaded sample from reception. Saving the scanned result will update the sample status.
                     </div>
                   )}
-                  <div style={{ marginBottom: "12px" }}>
+
+                  <div style={{ marginBottom: 12 }}>
                     <label>Barcode</label>
-                    <input
-                      value={scanForm.barcode}
-                      onChange={(e) => setScanForm({ ...scanForm, barcode: e.target.value })}
-                      style={inputStyle}
-                      placeholder="Scan barcode"
-                    />
+                    <input value={scanForm.barcode} onChange={(e) => setScanForm({ ...scanForm, barcode: e.target.value })} style={inputStyle} placeholder="Scan barcode" />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>MRN</label>
-                    <input
-                      value={scanForm.mrn}
-                      onChange={(e) => setScanForm({ ...scanForm, mrn: e.target.value })}
-                      style={inputStyle}
-                      placeholder="Patient MRN"
-                    />
+                    <input value={scanForm.mrn} onChange={(e) => setScanForm({ ...scanForm, mrn: e.target.value })} style={inputStyle} placeholder="Patient MRN" />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Department</label>
-                    <select
-                      value={scanForm.department}
-                      onChange={(e) => setScanForm({ ...scanForm, department: e.target.value })}
-                      style={inputStyle}
-                    >
+                    <select value={scanForm.department} onChange={(e) => setScanForm({ ...scanForm, department: e.target.value })} style={inputStyle}>
                       <option value="">Select department</option>
                       {DEPARTMENT_OPTIONS.map((department) => (
-                        <option key={department} value={department}>
-                          {department}
-                        </option>
+                        <option key={department} value={department}>{department}</option>
                       ))}
                     </select>
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Patient Name</label>
-                    <input
-                      value={scanForm.patient}
-                      onChange={(e) => setScanForm({ ...scanForm, patient: e.target.value })}
-                      style={inputStyle}
-                      placeholder="Patient name"
-                    />
+                    <input value={scanForm.patient} onChange={(e) => setScanForm({ ...scanForm, patient: e.target.value })} style={inputStyle} placeholder="Patient name" />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Test</label>
                     <select
                       value={scanForm.test}
@@ -2199,21 +2654,18 @@ export default function App() {
                       }}
                       style={inputStyle}
                     >
-                      <option>CBC</option>
-                      <option>Potassium</option>
-                      <option>Creatinine</option>
-                      <option>Troponin</option>
+                      {(scanForm.requestId
+                        ? getRemainingTestsForSample(samples.find((s) => s.id === scanForm.requestId) || { tests: TEST_OPTIONS, completedTests: [] })
+                        : TEST_OPTIONS
+                      ).map((test) => (
+                        <option key={test} value={test}>{test}</option>
+                      ))}
                     </select>
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Upload Result Sheet</label>
-                    <input
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={handleScanFileChange}
-                      style={inputStyle}
-                    />
+                    <input type="file" accept="image/*,.pdf" onChange={handleScanFileChange} style={inputStyle} />
                   </div>
 
                   {scanForm.fileName && (
@@ -2225,37 +2677,23 @@ export default function App() {
                   {scanForm.filePreview && (
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ marginBottom: 8, fontWeight: "bold" }}>Preview</div>
-
                       {scanForm.fileType === "application/pdf" ? (
                         <iframe
                           src={scanForm.filePreview}
                           title="Uploaded PDF preview"
-                          style={{
-                            width: "100%",
-                            height: 320,
-                            border: "1px solid #cbd5e1",
-                            borderRadius: 12,
-                            background: "#fff",
-                          }}
+                          style={{ width: "100%", height: 320, border: "1px solid #cbd5e1", borderRadius: 12, background: "#fff" }}
                         />
                       ) : (
                         <img
                           src={scanForm.filePreview}
                           alt="Uploaded result sheet preview"
-                          style={{
-                            width: "100%",
-                            maxHeight: 220,
-                            objectFit: "contain",
-                            border: "1px solid #cbd5e1",
-                            borderRadius: 12,
-                            background: "#fff",
-                          }}
+                          style={{ width: "100%", maxHeight: 220, objectFit: "contain", border: "1px solid #cbd5e1", borderRadius: 12, background: "#fff" }}
                         />
                       )}
                     </div>
                   )}
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>OCR Text</label>
                     <textarea
                       value={scanForm.ocrText}
@@ -2265,27 +2703,17 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Time</label>
-                    <input
-                      value={scanForm.time}
-                      onChange={(e) => setScanForm({ ...scanForm, time: e.target.value })}
-                      style={inputStyle}
-                      placeholder="10:45"
-                    />
+                    <input value={scanForm.time} onChange={(e) => setScanForm({ ...scanForm, time: e.target.value })} style={inputStyle} placeholder="10:45" />
                   </div>
 
-                  <div style={{ marginBottom: "12px" }}>
+                  <div style={{ marginBottom: 12 }}>
                     <label>Technician Name</label>
-                    <input
-                      value={scanForm.technician}
-                      onChange={(e) => setScanForm({ ...scanForm, technician: e.target.value })}
-                      style={inputStyle}
-                      placeholder="Technician name"
-                    />
+                    <input value={scanForm.technician} onChange={(e) => setScanForm({ ...scanForm, technician: e.target.value })} style={inputStyle} placeholder="Technician name" />
                   </div>
 
-                  <div style={{ marginBottom: "16px" }}>
+                  <div style={{ marginBottom: 16 }}>
                     <label>Comment / Note (Optional)</label>
                     <textarea
                       value={scanForm.comment}
@@ -2296,12 +2724,8 @@ export default function App() {
                   </div>
 
                   <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-                    <button type="button" onClick={extractFromOCR} style={smallButtonBlue}>
-                      Extract Results
-                    </button>
-                    <button type="button" onClick={handleSaveScannedResult} style={buttonStyleInline}>
-                      Confirm & Save
-                    </button>
+                    <button type="button" onClick={extractFromOCR} style={smallButtonBlue}>Extract Results</button>
+                    <button type="button" onClick={handleSaveScannedResult} style={buttonStyleInline}>Confirm & Save</button>
                   </div>
 
                   {extractedData && (
@@ -2311,16 +2735,7 @@ export default function App() {
                       <div style={{ marginBottom: 8 }}><strong>Result:</strong> {extractedData.result}</div>
                       <div>
                         <strong>Status:</strong>{" "}
-                        <span
-                          style={{
-                            ...badgeStyle(extractedData.status),
-                            borderRadius: 999,
-                            padding: "4px 10px",
-                            fontSize: 12,
-                            fontWeight: "bold",
-                            display: "inline-block",
-                          }}
-                        >
+                        <span style={{ ...badgeStyle(extractedData.status), borderRadius: 999, padding: "4px 10px", fontSize: 12, fontWeight: "bold", display: "inline-block" }}>
                           {extractedData.status}
                         </span>
                       </div>
@@ -2333,153 +2748,37 @@ export default function App() {
 
           {canViewResultsPanel && (
             <div style={panelStyle}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: "16px",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
                 <div>
-                  <h2 style={{ marginTop: 0, marginBottom: "6px" }}>
+                  <h2 style={{ marginTop: 0, marginBottom: 6 }}>
                     {session.role === "Doctor"
                       ? "Doctor Portal"
                       : session.role === "Admin"
                       ? "System Overview"
-                      : "Doctor View"}
+                      : "Results View"}
                   </h2>
                   <p style={{ color: "#64748b", margin: 0 }}>
                     {session.role === "Doctor"
                       ? "Search by patient MRN to view results"
-                      : session.role === "Admin"
-                      ? "Review all downtime results and account activity"
-                      : "Search temporary results during LIS downtime"}
+                      : "Review downtime results with alert status, comments, and actions."}
                   </p>
                 </div>
-
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={{ ...inputStyle, width: "280px", marginBottom: 0 }}
-                  placeholder={
-                    session?.role === "Doctor"
-                      ? "Search by patient MRN only..."
-                      : "Search by barcode, MRN, patient..."
-                  }
-                />
               </div>
 
-              {session.role === "Doctor" && (
-                <div
-                  style={{
-                    marginTop: "16px",
-                    marginBottom: "18px",
-                    display: "flex",
-                    gap: "12px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div style={{ ...cardStyle, minWidth: 220, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                    <div style={{ color: "#b91c1c", fontSize: "14px" }}>Pending Critical Alerts</div>
-                    <div
-                      style={{
-                        fontSize: "28px",
-                        fontWeight: "bold",
-                        marginTop: "8px",
-                        color: "#b91c1c",
-                      }}
-                    >
-                      {pendingDoctorAlertsCount}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {session.role !== "Doctor" && (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: "12px",
-                    marginTop: "20px",
-                    marginBottom: "20px",
-                  }}
-                >
-                  <div style={cardStyle}>
-                    <div style={{ color: "#64748b", fontSize: "14px" }}>Results Entered</div>
-                    <div style={{ fontSize: "28px", fontWeight: "bold", marginTop: "8px" }}>
-                      {results.length}
-                    </div>
-                  </div>
-
-                  <div style={{ ...cardStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                    <div style={{ color: "#b91c1c", fontSize: "14px" }}>Critical Alerts</div>
-                    <div
-                      style={{
-                        fontSize: "28px",
-                        fontWeight: "bold",
-                        marginTop: "8px",
-                        color: "#b91c1c",
-                      }}
-                    >
-                      {criticalCount}
-                    </div>
-                  </div>
-
-                  <div style={{ ...cardStyle, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
-                    <div style={{ color: "#1d4ed8", fontSize: "14px" }}>Pending Reconciliation</div>
-                    <div
-                      style={{
-                        fontSize: "28px",
-                        fontWeight: "bold",
-                        marginTop: "8px",
-                        color: "#1d4ed8",
-                      }}
-                    >
-                      {pendingSyncCount}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {session?.role === "Doctor" && !search.trim() && (
-                <div
-                  style={{
-                    marginTop: "20px",
-                    marginBottom: "16px",
-                    background: "#fff7ed",
-                    border: "1px solid #fed7aa",
-                    borderRadius: "16px",
-                    padding: "16px",
-                    color: "#9a3412",
-                    fontWeight: "bold",
-                  }}
-                >
+              {session.role === "Doctor" && !search.trim() && (
+                <div style={{ marginTop: 20, marginBottom: 16, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 16, padding: 16, color: "#9a3412", fontWeight: "bold" }}>
                   Please enter the patient MRN to view results.
                 </div>
               )}
 
-              {session?.role === "Doctor" && search.trim() && filteredResults.length === 0 && (
-                <div
-                  style={{
-                    marginTop: "20px",
-                    marginBottom: "16px",
-                    background: "#f8fafc",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "16px",
-                    padding: "16px",
-                    color: "#475569",
-                    fontWeight: "bold",
-                  }}
-                >
+              {session.role === "Doctor" && search.trim() && filteredResults.length === 0 && (
+                <div style={{ marginTop: 20, marginBottom: 16, background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 16, padding: 16, color: "#475569", fontWeight: "bold" }}>
                   No results found for this MRN.
                 </div>
               )}
 
-              {session?.role === "Doctor" && !search.trim() ? null : (
-                <div style={{ overflowX: "auto", marginTop: session.role === "Doctor" ? 20 : 0 }}>
+              {session.role === "Doctor" && !search.trim() ? null : (
+                <div style={{ overflowX: "auto", marginTop: 20 }}>
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ background: "#f8fafc" }}>
@@ -2490,6 +2789,7 @@ export default function App() {
                         <th style={thStyle}>Test</th>
                         <th style={thStyle}>Result</th>
                         <th style={thStyle}>Status</th>
+                        <th style={thStyle}>Alert</th>
                         <th style={thStyle}>Sync</th>
                         <th style={thStyle}>Source</th>
                         <th style={thStyle}>Time</th>
@@ -2501,79 +2801,146 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredResults.map((item) => (
-                        <tr key={item.id}>
-                          <td style={tdStyle}>{item.barcode}</td>
-                          <td style={tdStyle}>{item.mrn}</td>
-                          <td style={tdStyle}>{item.department || "-"}</td>
-                          <td style={tdStyle}>{item.patient}</td>
-                          <td style={tdStyle}>{item.test}</td>
-                          <td style={tdStyle}>{item.result}</td>
-                          <td style={tdStyle}>
-                            <span
-                              style={{
-                                ...badgeStyle(item.status),
-                                borderRadius: "999px",
-                                padding: "6px 12px",
-                                fontSize: "12px",
-                                fontWeight: "bold",
-                                display: "inline-block",
-                              }}
-                            >
-                              {item.status}
-                            </span>
-                          </td>
-                          <td style={tdStyle}>
-                            <span
-                              style={{
-                                ...syncBadgeStyle(item.synced),
-                                borderRadius: "999px",
-                                padding: "6px 12px",
-                                fontSize: "12px",
-                                fontWeight: "bold",
-                                display: "inline-block",
-                              }}
-                            >
-                              {item.synced ? "Synced" : "Pending"}
-                            </span>
-                          </td>
-                          <td style={tdStyle}>{item.source}</td>
-                          <td style={tdStyle}>{item.time}</td>
-                          <td style={tdStyle}>{item.createdAt || "-"}</td>
-                          <td style={tdStyle}>{item.technician}</td>
-                          <td style={tdStyle}>{item.note}</td>
-                          <td style={tdStyle}>{item.comment || "-"}</td>
-                          <td style={tdStyle}>
-                            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                              {canEnterResults && !item.synced && (
-                                <button
-                                  type="button"
-                                  style={smallButtonBlue}
-                                  onClick={() => handleSync(item.id)}
-                                >
-                                  Mark for LIS Entry
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                style={smallButtonGray}
-                                onClick={() => handlePrint(item)}
+                      {filteredResults.map((item) => {
+                        const alertItem = alertMapByResultId[item.id];
+                        const alertStatus =
+                          alertItem
+                            ? alertItem.acknowledged
+                              ? "Acknowledged"
+                              : "Pending"
+                            : item.status === "Critical"
+                            ? "Pending"
+                            : "None";
+
+                        return (
+                          <tr key={item.id} style={item.status === "Critical" ? criticalRowStyle : undefined}>
+                            <td style={tdStyle}>{item.barcode}</td>
+                            <td style={tdStyle}>{item.mrn}</td>
+                            <td style={tdStyle}>{item.department || "-"}</td>
+                            <td style={tdStyle}>{item.patient}</td>
+                            <td style={tdStyle}>{item.test}</td>
+                            <td style={tdStyle}>{item.result}</td>
+                            <td style={tdStyle}>
+                              <span style={{ ...badgeStyle(item.status), borderRadius: "999px", padding: "6px 12px", fontSize: 12, fontWeight: "bold", display: "inline-block" }}>
+                                {item.status}
+                              </span>
+                            </td>
+                            <td style={tdStyle}>
+                              <span
+                                style={{
+                                  ...(
+                                    alertStatus === "Pending"
+                                      ? badgeStyle("Critical")
+                                      : alertStatus === "Acknowledged"
+                                      ? syncBadgeStyle(true)
+                                      : { background: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0" }
+                                  ),
+                                  borderRadius: 999,
+                                  padding: "6px 12px",
+                                  fontSize: 12,
+                                  fontWeight: "bold",
+                                  display: "inline-block",
+                                }}
                               >
-                                Print
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                                {alertStatus}
+                              </span>
+                            </td>
+                            <td style={tdStyle}>
+                              <span style={{ ...syncBadgeStyle(item.synced), borderRadius: "999px", padding: "6px 12px", fontSize: 12, fontWeight: "bold", display: "inline-block" }}>
+                                {item.synced ? "Synced" : "Pending"}
+                              </span>
+                            </td>
+                            <td style={tdStyle}>{item.source}</td>
+                            <td style={tdStyle}>{item.time}</td>
+                            <td style={tdStyle}>{item.createdAt || "-"}</td>
+                            <td style={tdStyle}>{item.technician}</td>
+                            <td style={tdStyle}>{item.note}</td>
+                            <td style={tdStyle}>{item.comment || "-"}</td>
+                            <td style={tdStyle}>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                {canEnterResults && !item.synced && !item.cancelled && (
+                                  <button type="button" style={smallButtonBlue} onClick={() => handleSync(item.id)}>
+                                    Mark for LIS Entry
+                                  </button>
+                                )}
+                                <button type="button" style={smallButtonGray} onClick={() => handlePrintResult(item)}>
+                                  Print
+                                </button>
+                                {canManageResults && !item.cancelled && (
+                                  <>
+                                    <button type="button" style={smallButtonPurple} onClick={() => startEditResult(item)}>
+                                      Edit
+                                    </button>
+                                    <button type="button" style={smallButtonOrange} onClick={() => handleCancelResult(item)}>
+                                      Cancel
+                                    </button>
+                                  </>
+                                )}
+                                {session.role === "Doctor" && alertItem && !alertItem.acknowledged && (
+                                  <button type="button" style={smallButtonOrange} onClick={() => acknowledgeCriticalAlert(alertItem.id)}>
+                                    تم الاطلاع
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               )}
 
+              {editingResultId && (
+                <div style={editBoxStyle}>
+                  <h3 style={{ marginTop: 0 }}>Edit Result</h3>
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Result</label>
+                    <textarea
+                      value={editForm.result}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, result: e.target.value }))}
+                      style={{ ...inputStyle, minHeight: 90, resize: "vertical" }}
+                    />
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Comment</label>
+                    <textarea
+                      value={editForm.comment}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, comment: e.target.value }))}
+                      style={{ ...inputStyle, minHeight: 80, resize: "vertical" }}
+                    />
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Time</label>
+                    <input
+                      value={editForm.time}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, time: e.target.value }))}
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div style={{ marginBottom: 16 }}>
+                    <label>Note</label>
+                    <input
+                      value={editForm.note}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, note: e.target.value }))}
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button type="button" style={smallButtonGreen} onClick={saveEditedResult}>
+                      Save Edit
+                    </button>
+                    <button type="button" style={smallButtonGray} onClick={() => setEditingResultId("")}>
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div style={aiNoteStyle}>
-                <strong>Prototype Notice:</strong> results and downtime work are saved locally in this browser
-                and can be exported to CSV for later reconciliation. This demo does not connect directly to
-                the live LIS.
+                <strong>Prototype Notice:</strong> downtime work is saved locally in this browser, supports audit trail,
+                barcode printing, multi-test sample requests, and doctor alert acknowledgment. This demo does not connect
+                directly to the live LIS.
               </div>
             </div>
           )}
@@ -2606,26 +2973,6 @@ const topBannerStyle = {
   marginBottom: "24px",
   boxShadow: "0 14px 36px rgba(15, 23, 42, 0.18)",
   border: "1px solid rgba(255,255,255,0.08)",
-};
-
-const topLogoBoxStyle = {
-  width: "180px",
-  minHeight: "82px",
-  borderRadius: "18px",
-  background: "rgba(255,255,255,0.12)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  overflow: "hidden",
-  border: "1px solid rgba(255,255,255,0.18)",
-  backdropFilter: "blur(6px)",
-  padding: "8px 12px",
-};
-
-const topLogoStyle = {
-  width: "100%",
-  maxHeight: "66px",
-  objectFit: "contain",
 };
 
 const topHospitalNameStyle = {
@@ -2700,16 +3047,6 @@ const loginHeaderStyle = {
   gap: 16,
   marginBottom: 22,
   flexWrap: "wrap",
-};
-
-const loginLogoStyle = {
-  width: 170,
-  maxHeight: 74,
-  objectFit: "contain",
-  borderRadius: 14,
-  background: "#f8fafc",
-  border: "1px solid #e2e8f0",
-  padding: 8,
 };
 
 const loginHospitalNameStyle = {
@@ -2977,4 +3314,66 @@ const criticalAlertDetailsStyle = {
   borderRadius: 16,
   padding: 16,
   lineHeight: 1.9,
+};
+
+const checkboxGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 10,
+  marginTop: 8,
+};
+
+const checkboxItemStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 12,
+  padding: "10px 12px",
+};
+
+const dashboardGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+  marginTop: 20,
+  marginBottom: 20,
+};
+
+const metricLabelStyle = {
+  color: "#64748b",
+  fontSize: 14,
+};
+
+const metricValueStyle = {
+  fontSize: 28,
+  fontWeight: "bold",
+  marginTop: 8,
+};
+
+const filtersGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+  marginTop: 10,
+};
+
+const auditCardStyle = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 14,
+  padding: 12,
+};
+
+const criticalRowStyle = {
+  background: "#fff7f7",
+};
+
+const editBoxStyle = {
+  marginTop: 20,
+  background: "#f8fafc",
+  border: "1px solid #cbd5e1",
+  borderRadius: 16,
+  padding: 16,
 };
