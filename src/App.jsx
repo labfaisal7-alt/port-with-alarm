@@ -1,751 +1,317 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+/* ================================
+   STORAGE KEYS
+================================ */
 const STORAGE_KEYS = {
   session: "lab_portal_session",
   results: "lab_portal_results",
   samples: "lab_portal_samples",
-  entryMode: "lab_portal_entry_mode",
-  form: "lab_portal_manual_form",
-  scanForm: "lab_portal_scan_form",
-  sampleForm: "lab_portal_sample_form",
-  extractedData: "lab_portal_extracted_data",
-  employees: "lab_portal_employees",
-  criticalAlerts: "lab_portal_critical_alerts",
-  auditLogs: "lab_portal_audit_logs",
+  alerts: "lab_portal_alerts",
+  audit: "lab_portal_audit",
 };
 
+/* ================================
+   CONSTANTS
+================================ */
 const DEPARTMENT_OPTIONS = [
-  "Emergency",
-  "ICU",
-  "Ward",
-  "OPD",
-  "NICU",
-  "PICU",
-  "OR",
-  "Labor Room",
-  "Dialysis",
-  "Other",
+  "Emergency","ICU","Ward","OPD","NICU","PICU","OR","Labor Room","Dialysis","Other"
 ];
-
-const TEST_OPTIONS = ["CBC", "Potassium", "Creatinine", "Troponin"];
-const SAMPLE_STATUS_OPTIONS = [
-  "Received",
-  "In Progress",
-  "Partial Completed",
-  "Completed",
-  "Cancelled",
-];
-const RESULT_STATUS_OPTIONS = ["Normal", "Review", "Critical", "Cancelled"];
 
 const HOSPITAL_NAME = "King Salman Armed Forces Hospital";
-const SYSTEM_NAME = "Zero Downtime Lab Portal Prototype";
+const SYSTEM_NAME = "Zero Downtime Lab Portal";
 
+/* ================================
+   HELPERS
+================================ */
 function createId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function getNowTime() {
-  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function getNowDateTime() {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mi = String(now.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function safeRead(key, fallback) {
   try {
-    const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) : fallback;
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : fallback;
   } catch {
     return fallback;
   }
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;");
+function now() {
+  return new Date().toISOString();
 }
 
-function parseCSVLine(line) {
-  const values = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    const nextChar = line[i + 1];
-
-    if (char === '"' && inQuotes && nextChar === '"') {
-      current += '"';
-      i += 1;
-    } else if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === "," && !inQuotes) {
-      values.push(current);
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  values.push(current);
-  return values;
-}
-
-function uniqueValues(arr) {
-  return [...new Set((arr || []).filter(Boolean))];
-}
-
+/* ================================
+   TIME HELPERS (TAT)
+================================ */
 function parseStoredDateTime(value) {
   if (!value) return null;
-  const normalized = String(value).trim().replace(" ", "T");
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
+  const d = new Date(value.replace(" ", "T"));
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function getTurnaroundMinutes(sample, result) {
   if (!sample || !result) return null;
 
-  const sampleDate = parseStoredDateTime(sample.createdAt) || parseStoredDateTime(sample.time);
-  const resultDate = parseStoredDateTime(result.createdAt) || parseStoredDateTime(result.time);
+  const s = parseStoredDateTime(sample.createdAt);
+  const r = parseStoredDateTime(result.createdAt);
 
-  if (!sampleDate || !resultDate) return null;
+  if (!s || !r) return null;
 
-  const diffMs = resultDate.getTime() - sampleDate.getTime();
-  if (diffMs < 0) return null;
-
-  return Math.round(diffMs / 60000);
+  return Math.round((r - s) / 60000);
 }
 
-function formatTurnaround(minutes) {
-  if (minutes == null) return "-";
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return mins === 0 ? `${hours} h` : `${hours} h ${mins} min`;
+function formatTurnaround(min) {
+  if (!min) return "-";
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)}h ${min % 60}m`;
 }
 
-function tatStyle(minutes) {
-  if (minutes == null) return {};
-  if (minutes > 60) return { color: "#b91c1c", fontWeight: "bold" };
-  if (minutes > 30) return { color: "#b45309", fontWeight: "bold" };
-  return { color: "#166534", fontWeight: "bold" };
-}
+/* ================================
+   STATUS LOGIC
+================================ */
+function getStatus(test, value) {
+  const v = parseFloat(value);
 
-function generateBarcodeSVG(value) {
-  const CODE39 = {
-    "0": "nnnwwnwnn",
-    "1": "wnnwnnnnw",
-    "2": "nnwwnnnnw",
-    "3": "wnwwnnnnn",
-    "4": "nnnwwnnnw",
-    "5": "wnnwwnnnn",
-    "6": "nnwwwnnnn",
-    "7": "nnnwnnwnw",
-    "8": "wnnwnnwnn",
-    "9": "nnwwnnwnn",
-    A: "wnnnnwnnw",
-    B: "nnwnnwnnw",
-    C: "wnwnnwnnn",
-    D: "nnnnwwnnw",
-    E: "wnnnwwnnn",
-    F: "nnwnwwnnn",
-    G: "nnnnnwwnw",
-    H: "wnnnnwwnn",
-    I: "nnwnnwwnn",
-    J: "nnnnwwwnn",
-    K: "wnnnnnnww",
-    L: "nnwnnnnww",
-    M: "wnwnnnnwn",
-    N: "nnnnwnnww",
-    O: "wnnnwnnwn",
-    P: "nnwnwnnwn",
-    Q: "nnnnnnwww",
-    R: "wnnnnnwwn",
-    S: "nnwnnnwwn",
-    T: "nnnnwnwwn",
-    U: "wwnnnnnnw",
-    V: "nwwnnnnnw",
-    W: "wwwnnnnnn",
-    X: "nwnnwnnnw",
-    Y: "wwnnwnnnn",
-    Z: "nwwnwnnnn",
-    "-": "nwnnnnwnw",
-    ".": "wwnnnnwnn",
-    " ": "nwwnnnwnn",
-    "*": "nwnnwnwnn",
-    $: "nwnwnwnnn",
-    "/": "nwnwnnnwn",
-    "+": "nwnnnwnwn",
-    "%": "nnnwnwnwn",
-  };
-
-  const safeValue = String(value || "")
-    .toUpperCase()
-    .replace(/[^0-9A-Z .\-/$+%]/g, "-");
-
-  const encoded = `*${safeValue}*`;
-  const narrow = 2;
-  const wide = 5;
-  const height = 80;
-  const gap = 2;
-
-  let x = 0;
-  let bars = "";
-
-  for (let c = 0; c < encoded.length; c += 1) {
-    const ch = encoded[c];
-    const pattern = CODE39[ch] || CODE39["-"];
-
-    for (let i = 0; i < pattern.length; i += 1) {
-      const isBar = i % 2 === 0;
-      const width = pattern[i] === "w" ? wide : narrow;
-      if (isBar) bars += `<rect x="${x}" y="0" width="${width}" height="${height}" fill="#000" />`;
-      x += width;
-    }
-
-    if (c < encoded.length - 1) x += gap;
+  if (test === "Potassium") {
+    if (v >= 6) return "Critical";
+    if (v >= 5.3) return "Review";
   }
 
-  const totalWidth = x;
-  return `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${height + 28}" viewBox="0 0 ${totalWidth} ${height + 28}">
-      ${bars}
-      <text x="${totalWidth / 2}" y="${height + 20}" text-anchor="middle" font-size="15" font-family="Arial, sans-serif" fill="#111">
-        ${escapeHtml(safeValue)}
-      </text>
-    </svg>
-  `;
+  return "Normal";
 }
 
-function getDefaultManualForm() {
-  return {
-    requestId: "",
-    barcode: "",
-    mrn: "",
-    department: "",
-    patient: "",
-    test: "CBC",
-    result: "",
-    cbc: { wbc: "", rbc: "", hb: "", platelets: "" },
-    time: "",
-    technician: "",
-    comment: "",
-  };
-}
-
-function getDefaultScanForm() {
-  return {
-    requestId: "",
-    barcode: "",
-    mrn: "",
-    department: "",
-    patient: "",
-    test: "CBC",
-    time: "",
-    technician: "",
-    fileName: "",
-    filePreview: "",
-    fileType: "",
-    ocrText: "",
-    comment: "",
-  };
-}
-
-function getDefaultSampleForm() {
-  return {
-    barcode: "",
-    mrn: "",
-    department: "",
-    patient: "",
-    tests: ["CBC"],
-    receivedBy: "",
-    time: "",
-  };
-}
-
-function computeSampleStatus(sample) {
-  if (sample.cancelled) return "Cancelled";
-  const total = Array.isArray(sample.tests) ? sample.tests.length : 0;
-  const completed = Array.isArray(sample.completedTests) ? sample.completedTests.length : 0;
-  if (sample.status === "In Progress" && completed === 0) return "In Progress";
-  if (completed === 0) return "Received";
-  if (completed < total) return "Partial Completed";
-  return "Completed";
-}
-
-function normalizeResults(data) {
-  if (!Array.isArray(data)) return [];
-  return data.map((item) => ({
-    id: item.id || createId(),
-    requestId: item.requestId || "",
-    barcode: item.barcode || "",
-    mrn: item.mrn || "",
-    department: item.department || "",
-    patient: item.patient || "",
-    test: item.test || "",
-    result: item.result || "",
-    status: item.status || "Normal",
-    time: item.time || "",
-    note: item.note || "",
-    technician: item.technician || "",
-    synced: !!item.synced,
-    source: item.source || "Manual Entry",
-    createdAt: item.createdAt || "",
-    comment: item.comment || "",
-    cancelled: !!item.cancelled,
-    cancelledBy: item.cancelledBy || "",
-    cancelledAt: item.cancelledAt || "",
-    editedAt: item.editedAt || "",
-    editedBy: item.editedBy || "",
-  }));
-}
-
-function normalizeSamples(data) {
-  if (!Array.isArray(data)) return [];
-  return data.map((item) => {
-    const tests = Array.isArray(item.tests) ? item.tests : item.test ? [item.test] : ["CBC"];
-    const completedTests = Array.isArray(item.completedTests) ? item.completedTests : [];
-    const base = {
-      id: item.id || createId(),
-      barcode: item.barcode || "",
-      mrn: item.mrn || "",
-      department: item.department || "",
-      patient: item.patient || "",
-      tests,
-      completedTests,
-      receivedBy: item.receivedBy || "",
-      time: item.time || "",
-      createdAt: item.createdAt || getNowDateTime(),
-      status: item.status || "Received",
-      inProgress: !!item.inProgress,
-      cancelled: !!item.cancelled,
-    };
-    return { ...base, status: computeSampleStatus(base) };
-  });
-}
-
-function normalizeCriticalAlerts(data) {
-  if (!Array.isArray(data)) return [];
-  return data.map((item) => ({
-    id: item.id || createId(),
-    resultId: item.resultId || "",
-    mrn: item.mrn || "",
-    patient: item.patient || "",
-    test: item.test || "",
-    result: item.result || "",
-    status: item.status || "Critical",
-    createdAt: item.createdAt || "",
-    acknowledged: !!item.acknowledged,
-    acknowledgedBy: item.acknowledgedBy || "",
-    acknowledgedAt: item.acknowledgedAt || "",
-    comment: item.comment || "",
-  }));
-}
-
-function normalizeAuditLogs(data) {
-  if (!Array.isArray(data)) return [];
-  return data.map((item) => ({
-    id: item.id || createId(),
-    action: item.action || "",
-    actor: item.actor || "",
-    role: item.role || "",
-    details: item.details || "",
-    createdAt: item.createdAt || getNowDateTime(),
-  }));
-}
-
+/* ================================
+   MAIN COMPONENT
+================================ */
 export default function App() {
   const [session, setSession] = useState(() => safeRead(STORAGE_KEYS.session, null));
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
-  const [loginError, setLoginError] = useState("");
-  const [results, setResults] = useState(() => normalizeResults(safeRead(STORAGE_KEYS.results, [])));
-  const [samples, setSamples] = useState(() => normalizeSamples(safeRead(STORAGE_KEYS.samples, [])));
-  const [search, setSearch] = useState("");
-  const [entryMode, setEntryMode] = useState(() => safeRead(STORAGE_KEYS.entryMode, "manual"));
-  const [form, setForm] = useState(() => ({ ...getDefaultManualForm(), ...safeRead(STORAGE_KEYS.form, getDefaultManualForm()) }));
-  const [scanForm, setScanForm] = useState(() => ({ ...getDefaultScanForm(), ...safeRead(STORAGE_KEYS.scanForm, getDefaultScanForm()) }));
-  const [sampleForm, setSampleForm] = useState(() => ({ ...getDefaultSampleForm(), ...safeRead(STORAGE_KEYS.sampleForm, getDefaultSampleForm()) }));
-  const [extractedData, setExtractedData] = useState(() => safeRead(STORAGE_KEYS.extractedData, null));
-  const [employees, setEmployees] = useState(() =>
-    safeRead(STORAGE_KEYS.employees, [
-      { id: 1, username: "lab", password: "1234", role: "Lab", name: "Laboratory Staff", active: true },
-      { id: 2, username: "reception1", password: "1234", role: "Reception", name: "Reception Staff", active: true },
-    ])
-  );
-  const [criticalAlerts, setCriticalAlerts] = useState(() => normalizeCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, [])));
-  const [auditLogs, setAuditLogs] = useState(() => normalizeAuditLogs(safeRead(STORAGE_KEYS.auditLogs, [])));
-  const [employeeForm, setEmployeeForm] = useState({ name: "", username: "", password: "", role: "Lab" });
-  const [filters, setFilters] = useState({ department: "", test: "", resultStatus: "", syncStatus: "", alertStatus: "", sampleStatus: "" });
-  const [editingResultId, setEditingResultId] = useState("");
-  const [editForm, setEditForm] = useState({ result: "", comment: "", time: "", note: "" });
+  const [results, setResults] = useState(() => safeRead(STORAGE_KEYS.results, []));
+  const [samples, setSamples] = useState(() => safeRead(STORAGE_KEYS.samples, []));
+  const [alerts, setAlerts] = useState(() => safeRead(STORAGE_KEYS.alerts, []));
+  const [audit, setAudit] = useState(() => safeRead(STORAGE_KEYS.audit, []));
 
-  const importInputRef = useRef(null);
-  const lastPlayedAlertIdsRef = useRef([]);
+  const audioRef = useRef(null);
 
+  /* ================================
+     SAVE STATE
+  ================================= */
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.results, JSON.stringify(results));
+  }, [results]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.samples, JSON.stringify(samples));
+  }, [samples]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.alerts, JSON.stringify(alerts));
+  }, [alerts]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.audit, JSON.stringify(audit));
+  }, [audit]);
+
+  /* ================================
+     CRITICAL ALERT HANDLER
+  ================================= */
+  function triggerCritical(result) {
+    if (alerts.find(a => a.resultId === result.id)) return;
+
+    const newAlert = {
+      id: createId(),
+      resultId: result.id,
+      mrn: result.mrn,
+      patient: result.patient,
+      seen: false,
+      createdAt: now(),
+    };
+
+    setAlerts(prev => [newAlert, ...prev]);
+
+    if (audioRef.current) {
+      audioRef.current.play().catch(() => {});
+    }
+  }  /* ================================
+     AUTH / DEMO USERS
+  ================================= */
   const fixedUsers = {
-    admin: { username: "admin", password: "1234", role: "Admin", name: "System Administrator", active: true },
-    doctor: { username: "doctor", password: "1234", role: "Doctor", name: "Duty Doctor", active: true },
-    reception: { username: "reception", password: "1234", role: "Reception", name: "Sample Reception Staff", active: true },
+    admin: {
+      username: "admin",
+      password: "1234",
+      role: "Admin",
+      name: "System Administrator",
+    },
+    doctor: {
+      username: "doctor",
+      password: "1234",
+      role: "Doctor",
+      name: "Duty Doctor",
+    },
+    lab: {
+      username: "lab",
+      password: "1234",
+      role: "Lab",
+      name: "Laboratory Staff",
+    },
+    reception: {
+      username: "reception",
+      password: "1234",
+      role: "Reception",
+      name: "Reception Staff",
+    },
   };
 
-  const canEnterResults = session?.role === "Lab" || session?.role === "All" || session?.role === "Admin";
-  const canReceiveSamples = session?.role === "Reception" || session?.role === "All" || session?.role === "Admin";
-  const canViewResultsPanel = session?.role !== "Reception";
-  const canManageResults = session?.role === "Lab" || session?.role === "Admin";
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [loginError, setLoginError] = useState("");
 
-  function addAuditLog(action, details) {
-    if (!session) return;
-    const entry = {
+  const [sampleForm, setSampleForm] = useState({
+    barcode: "",
+    mrn: "",
+    patient: "",
+    department: "",
+    tests: ["CBC"],
+    receivedBy: "",
+  });
+
+  const [manualForm, setManualForm] = useState({
+    sampleId: "",
+    barcode: "",
+    mrn: "",
+    patient: "",
+    department: "",
+    test: "CBC",
+    result: "",
+    technician: "",
+    comment: "",
+  });
+
+  const [searchMrn, setSearchMrn] = useState("");
+  const [editingResultId, setEditingResultId] = useState(null);
+  const [editForm, setEditForm] = useState({
+    result: "",
+    comment: "",
+  });
+
+  const canReceiveSamples =
+    session?.role === "Reception" || session?.role === "Admin";
+
+  const canEnterResults =
+    session?.role === "Lab" || session?.role === "Admin";
+
+  const canManageResults =
+    session?.role === "Lab" || session?.role === "Admin";
+
+  function addAudit(action, details) {
+    const row = {
       id: createId(),
       action,
-      actor: session.name,
-      role: session.role,
       details,
-      createdAt: getNowDateTime(),
+      actor: session?.name || "System",
+      role: session?.role || "-",
+      createdAt: now(),
     };
-    setAuditLogs((prev) => [entry, ...prev].slice(0, 300));
-  }
-
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.results, JSON.stringify(results)); }, [results]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.samples, JSON.stringify(samples)); }, [samples]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.entryMode, JSON.stringify(entryMode)); }, [entryMode]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.form, JSON.stringify(form)); }, [form]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.scanForm, JSON.stringify(scanForm)); }, [scanForm]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.sampleForm, JSON.stringify(sampleForm)); }, [sampleForm]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.extractedData, JSON.stringify(extractedData)); }, [extractedData]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(session)); }, [session]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.employees, JSON.stringify(employees)); }, [employees]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.criticalAlerts, JSON.stringify(criticalAlerts)); }, [criticalAlerts]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.auditLogs, JSON.stringify(auditLogs)); }, [auditLogs]);
-
-  useEffect(() => {
-    if (!session) return;
-    if (canEnterResults) {
-      setForm((prev) => ({ ...prev, technician: prev.technician || session.name }));
-      setScanForm((prev) => ({ ...prev, technician: prev.technician || session.name }));
-    }
-    if (canReceiveSamples) {
-      setSampleForm((prev) => ({ ...prev, receivedBy: prev.receivedBy || session.name }));
-    }
-  }, [session, canEnterResults, canReceiveSamples]);
-
-  useEffect(() => {
-    return () => {
-      if (scanForm.filePreview) URL.revokeObjectURL(scanForm.filePreview);
-    };
-  }, [scanForm.filePreview]);
-
-  useEffect(() => {
-    function handleStorageChange(e) {
-      if (e.key === STORAGE_KEYS.results) setResults(normalizeResults(safeRead(STORAGE_KEYS.results, [])));
-      if (e.key === STORAGE_KEYS.samples) setSamples(normalizeSamples(safeRead(STORAGE_KEYS.samples, [])));
-      if (e.key === STORAGE_KEYS.criticalAlerts) setCriticalAlerts(normalizeCriticalAlerts(safeRead(STORAGE_KEYS.criticalAlerts, [])));
-      if (e.key === STORAGE_KEYS.auditLogs) setAuditLogs(normalizeAuditLogs(safeRead(STORAGE_KEYS.auditLogs, [])));
-    }
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
-
-  const alertMapByResultId = useMemo(() => {
-    const map = {};
-    criticalAlerts.forEach((item) => {
-      if (item.resultId) map[item.resultId] = item;
-    });
-    return map;
-  }, [criticalAlerts]);
-
-  const pendingDoctorAlerts = useMemo(() => criticalAlerts.filter((item) => !item.acknowledged), [criticalAlerts]);
-
-  useEffect(() => {
-    function playCriticalAlertSound() {
-      try {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass) return;
-        const audioCtx = new AudioContextClass();
-        const notes = [880, 660, 880];
-        notes.forEach((freq, index) => {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.type = "sine";
-          osc.frequency.value = freq;
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          const start = audioCtx.currentTime + index * 0.22;
-          const end = start + 0.16;
-          gain.gain.setValueAtTime(0.0001, start);
-          gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.0001, end);
-          osc.start(start);
-          osc.stop(end + 0.02);
-        });
-      } catch {}
-    }
-
-    if (session?.role !== "Doctor") return;
-    const newUnheardAlerts = pendingDoctorAlerts.filter((item) => !lastPlayedAlertIdsRef.current.includes(item.id));
-    if (newUnheardAlerts.length) {
-      playCriticalAlertSound();
-      lastPlayedAlertIdsRef.current = [...lastPlayedAlertIdsRef.current, ...newUnheardAlerts.map((item) => item.id)];
-    }
-  }, [pendingDoctorAlerts, session]);
-
-  function isDuplicateSample(candidate) {
-    const normalizedBarcode = candidate.barcode.trim().toLowerCase();
-    const normalizedMrn = candidate.mrn.trim().toLowerCase();
-    const normalizedTests = uniqueValues(candidate.tests).sort().join("|");
-    return samples.some((sample) => {
-      if (sample.cancelled) return false;
-      const sameBarcode = normalizedBarcode && sample.barcode.trim().toLowerCase() === normalizedBarcode;
-      const sameMrnAndTests = sample.mrn.trim().toLowerCase() === normalizedMrn && uniqueValues(sample.tests).sort().join("|") === normalizedTests && sample.status !== "Completed";
-      return sameBarcode || sameMrnAndTests;
-    });
-  }
-
-  function isDuplicateResult(candidate) {
-    return results.some((item) => {
-      if (item.cancelled) return false;
-      const sameRequestAndTest = candidate.requestId && item.requestId === candidate.requestId && item.test === candidate.test;
-      const sameBarcodeMrnTest = item.barcode === candidate.barcode && item.mrn === candidate.mrn && item.test === candidate.test && item.status !== "Cancelled";
-      return sameRequestAndTest || sameBarcodeMrnTest;
-    });
-  }
-
-  function updateSampleStatus(sampleId, updates) {
-    setSamples((prev) =>
-      prev.map((sample) => {
-        if (sample.id !== sampleId) return sample;
-        const updated = { ...sample, ...updates };
-        return { ...updated, status: computeSampleStatus(updated) };
-      })
-    );
-  }
-
-  function getRemainingTestsForSample(sample) {
-    return sample.tests.filter((test) => !sample.completedTests.includes(test));
+    setAudit((prev) => [row, ...prev]);
   }
 
   function handleLogin(e) {
     e.preventDefault();
+
     const username = loginForm.username.trim().toLowerCase();
     const password = loginForm.password;
-    const fixedUser = fixedUsers[username];
+    const user = fixedUsers[username];
 
-    if (fixedUser) {
-      if (!fixedUser.active || fixedUser.password !== password) {
-        setLoginError("Invalid username or password");
-        return;
-      }
-      setSession(fixedUser);
-      setLoginError("");
-      setSearch("");
-      return;
-    }
-
-    const employee = employees.find(
-      (emp) => emp.username.toLowerCase() === username && emp.password === password && emp.active
-    );
-
-    if (!employee) {
+    if (!user || user.password !== password) {
       setLoginError("Invalid username or password");
       return;
     }
 
-    setSession(employee);
+    setSession(user);
+    localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(user));
     setLoginError("");
-    setSearch("");
   }
 
   function handleLogout() {
     setSession(null);
-    setLoginForm({ username: "", password: "" });
-    setLoginError("");
-    setSearch("");
     localStorage.removeItem(STORAGE_KEYS.session);
+    setLoginForm({ username: "", password: "" });
   }
 
-  function resetAllSavedData() {
-    const ok = window.confirm("This will clear all saved downtime data from this browser. Continue?");
-    if (!ok) return;
+  /* ================================
+     SAMPLE STATUS / DUPLICATION
+  ================================= */
+  function computeStatusForSample(sample, allResults) {
+    if (sample.cancelled) return "Cancelled";
 
-    if (scanForm.filePreview) URL.revokeObjectURL(scanForm.filePreview);
-    Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+    const linked = allResults.filter(
+      (r) => !r.cancelled && r.sampleId === sample.id
+    );
 
-    setResults([]);
-    setSamples([]);
-    setEntryMode("manual");
-    setForm({ ...getDefaultManualForm(), technician: session?.name || "" });
-    setScanForm({ ...getDefaultScanForm(), technician: session?.name || "" });
-    setSampleForm({ ...getDefaultSampleForm(), receivedBy: session?.name || "" });
-    setExtractedData(null);
-    setEmployees([
-      { id: 1, username: "lab", password: "1234", role: "Lab", name: "Laboratory Staff", active: true },
-      { id: 2, username: "reception1", password: "1234", role: "Reception", name: "Reception Staff", active: true },
-    ]);
-    setCriticalAlerts([]);
-    setAuditLogs([]);
-    setSearch("");
-    lastPlayedAlertIdsRef.current = [];
+    const completedTests = linked.map((r) => r.test);
+    const total = sample.tests.length;
+
+    if (completedTests.length === 0) return "Received";
+    if (completedTests.length < total) return "Partial Completed";
+    return "Completed";
   }
 
-  function handleExportCSV() {
-    if (!results.length) {
-      alert("No results available to export");
-      return;
-    }
+  function refreshSamplesStatus(nextResults) {
+    setSamples((prev) =>
+      prev.map((sample) => ({
+        ...sample,
+        status: computeStatusForSample(sample, nextResults),
+      }))
+    );
+  }
 
-    const headers = [
-      "ID", "RequestID", "Barcode", "MRN", "Department", "Patient", "Test", "Result", "Status",
-      "AlertStatus", "Synced", "Source", "Time", "CreatedAt", "Technician", "Note", "Comment", "TAT",
-      "Cancelled", "CancelledBy", "CancelledAt", "EditedBy", "EditedAt",
-    ];
+  function sampleExists(candidate) {
+    return samples.some((s) => {
+      if (s.cancelled) return false;
 
-    const rows = results.map((item) => {
-      const sample = samples.find((s) => s.id === item.requestId) || samples.find((s) => s.barcode === item.barcode);
-      return [
-        item.id,
-        item.requestId,
-        item.barcode,
-        item.mrn,
-        item.department,
-        item.patient,
-        item.test,
-        item.result,
-        item.status,
-        alertMapByResultId[item.id] ? (alertMapByResultId[item.id].acknowledged ? "Acknowledged" : "Pending") : item.status === "Critical" ? "Pending" : "-",
-        item.synced ? "Yes" : "No",
-        item.source,
-        item.time,
-        item.createdAt,
-        item.technician,
-        item.note,
-        item.comment,
-        formatTurnaround(getTurnaroundMinutes(sample, item)),
-        item.cancelled ? "Yes" : "No",
-        item.cancelledBy,
-        item.cancelledAt,
-        item.editedBy,
-        item.editedAt,
-      ];
+      const sameBarcode =
+        s.barcode.trim().toLowerCase() === candidate.barcode.trim().toLowerCase();
+
+      const sameMrnAndPatient =
+        s.mrn.trim().toLowerCase() === candidate.mrn.trim().toLowerCase() &&
+        s.patient.trim().toLowerCase() === candidate.patient.trim().toLowerCase();
+
+      return sameBarcode || sameMrnAndPatient;
     });
-
-    const csvContent = [headers, ...rows]
-      .map((row) => row.map((v) => `"${String(v ?? "").replace(/\"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", "downtime_lab_results.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   }
 
-  function openImportDialog() {
-    importInputRef.current?.click();
+  function resultExists(candidate) {
+    return results.some((r) => {
+      if (r.cancelled) return false;
+
+      const sameSampleAndTest =
+        r.sampleId &&
+        candidate.sampleId &&
+        r.sampleId === candidate.sampleId &&
+        r.test === candidate.test;
+
+      const sameBarcodeMrnTest =
+        r.barcode === candidate.barcode &&
+        r.mrn === candidate.mrn &&
+        r.test === candidate.test;
+
+      return sameSampleAndTest || sameBarcodeMrnTest;
+    });
   }
 
-  function handleImportCSV(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-
-    reader.onload = (event) => {
-      try {
-        const text = String(event.target?.result || "").trim();
-        if (!text) {
-          alert("The selected CSV file is empty");
-          return;
-        }
-
-        const lines = text.split(/\r?\n/).filter(Boolean);
-        if (lines.length < 2) {
-          alert("CSV file does not contain any result rows");
-          return;
-        }
-
-        const headers = parseCSVLine(lines[0]).map((h) => h.trim().toLowerCase());
-        const requiredHeaders = ["barcode", "mrn", "patient", "test", "result"];
-        const missingHeaders = requiredHeaders.filter((h) => !headers.includes(h));
-
-        if (missingHeaders.length) {
-          alert(`Missing required columns: ${missingHeaders.join(", ")}`);
-          return;
-        }
-
-        const importedRows = lines.slice(1).map((line) => {
-          const cols = parseCSVLine(line);
-          const row = {};
-          headers.forEach((header, index) => {
-            row[header] = cols[index] ?? "";
-          });
-
-          return {
-            id: row.id || createId(),
-            requestId: row.requestid || "",
-            barcode: row.barcode || "",
-            mrn: row.mrn || "",
-            department: row.department || "",
-            patient: row.patient || "",
-            test: row.test || "",
-            result: row.result || "",
-            status: row.status || "Normal",
-            synced: String(row.synced || "").toLowerCase() === "yes",
-            source: row.source || "Imported CSV",
-            time: row.time || "",
-            createdAt: row.createdat || getNowDateTime(),
-            technician: row.technician || "",
-            note: row.note || "Imported from CSV",
-            comment: row.comment || "",
-            cancelled: String(row.cancelled || "").toLowerCase() === "yes",
-            cancelledBy: row.cancelledby || "",
-            cancelledAt: row.cancelledat || "",
-            editedBy: row.editedby || "",
-            editedAt: row.editedat || "",
-          };
-        });
-
-        const validRows = importedRows.filter((row) => row.barcode || row.mrn || row.patient || row.test || row.result);
-        if (!validRows.length) {
-          alert("No valid rows found in the CSV file");
-          return;
-        }
-
-        const replaceExisting = window.confirm("Do you want to replace existing results?\nPress OK to replace, or Cancel to append.");
-        if (replaceExisting) setResults(validRows);
-        else setResults((prev) => [...validRows, ...prev]);
-
-        addAuditLog("Results Imported", `${validRows.length} result(s) imported from CSV`);
-        alert(`Imported ${validRows.length} result(s) successfully.`);
-      } catch {
-        alert("Failed to import CSV file");
-      } finally {
-        if (importInputRef.current) importInputRef.current.value = "";
-      }
-    };
-
-    reader.readAsText(file);
-  }
-
+  /* ================================
+     SAMPLE ACTIONS
+  ================================= */
   function toggleSampleTest(test) {
     setSampleForm((prev) => {
       const exists = prev.tests.includes(test);
-      const nextTests = exists ? prev.tests.filter((t) => t !== test) : [...prev.tests, test];
-      return { ...prev, tests: nextTests.length ? nextTests : [test] };
+      const next = exists
+        ? prev.tests.filter((t) => t !== test)
+        : [...prev.tests, test];
+
+      return {
+        ...prev,
+        tests: next.length ? next : [test],
+      };
     });
   }
 
@@ -753,7 +319,13 @@ export default function App() {
     e.preventDefault();
     if (!canReceiveSamples) return;
 
-    if (!sampleForm.barcode || !sampleForm.mrn || !sampleForm.department || !sampleForm.patient || !sampleForm.receivedBy || !sampleForm.tests.length) {
+    if (
+      !sampleForm.barcode ||
+      !sampleForm.mrn ||
+      !sampleForm.patient ||
+      !sampleForm.department ||
+      !sampleForm.receivedBy
+    ) {
       alert("Please fill all required fields");
       return;
     }
@@ -762,476 +334,341 @@ export default function App() {
       id: createId(),
       barcode: sampleForm.barcode.trim(),
       mrn: sampleForm.mrn.trim(),
-      department: sampleForm.department,
       patient: sampleForm.patient.trim(),
-      tests: uniqueValues(sampleForm.tests),
-      completedTests: [],
+      department: sampleForm.department,
+      tests: sampleForm.tests,
       receivedBy: sampleForm.receivedBy.trim(),
-      time: sampleForm.time || getNowTime(),
-      createdAt: getNowDateTime(),
       status: "Received",
-      inProgress: false,
       cancelled: false,
+      createdAt: now(),
     };
 
-    if (isDuplicateSample(newSample)) {
-      alert("Possible duplicate sample detected. Please review barcode, MRN, or requested tests.");
+    if (sampleExists(newSample)) {
+      alert("Duplicate sample detected");
       return;
     }
 
     setSamples((prev) => [newSample, ...prev]);
-    addAuditLog("Sample Received", `Barcode ${newSample.barcode} | MRN ${newSample.mrn} | Tests: ${newSample.tests.join(", ")}`);
-    setSampleForm({ ...getDefaultSampleForm(), receivedBy: session.name });
+    addAudit(
+      "Sample Received",
+      `Barcode ${newSample.barcode} | MRN ${newSample.mrn} | Tests: ${newSample.tests.join(", ")}`
+    );
+
+    setSampleForm({
+      barcode: "",
+      mrn: "",
+      patient: "",
+      department: "",
+      tests: ["CBC"],
+      receivedBy: session?.name || "",
+    });
   }
 
-  function loadSampleToEntry(sample, mode = "manual") {
-    if (!canEnterResults) return;
-    const remainingTests = getRemainingTestsForSample(sample);
-    const selectedTest = remainingTests[0] || sample.tests[0] || "CBC";
+  function loadSampleToManual(sample) {
+    const existingTests = results
+      .filter((r) => !r.cancelled && r.sampleId === sample.id)
+      .map((r) => r.test);
 
-    updateSampleStatus(sample.id, { status: "In Progress", inProgress: true });
-    addAuditLog("Sample Loaded", `Barcode ${sample.barcode} loaded to ${mode} entry for test ${selectedTest}`);
+    const remaining = sample.tests.filter((t) => !existingTests.includes(t));
+    const selectedTest = remaining[0] || sample.tests[0];
 
-    if (mode === "manual") {
-      setForm({
-        ...getDefaultManualForm(),
-        requestId: sample.id,
-        barcode: sample.barcode,
-        mrn: sample.mrn,
-        department: sample.department,
-        patient: sample.patient,
-        test: selectedTest,
-        technician: session.name,
-      });
-      setEntryMode("manual");
-      return;
-    }
-
-    setScanForm({
-      ...getDefaultScanForm(),
-      requestId: sample.id,
+    setManualForm({
+      sampleId: sample.id,
       barcode: sample.barcode,
       mrn: sample.mrn,
-      department: sample.department,
       patient: sample.patient,
+      department: sample.department,
       test: selectedTest,
-      technician: session.name,
+      result: "",
+      technician: session?.name || "",
+      comment: "",
     });
-    setExtractedData(null);
-    setEntryMode("scan");
   }
 
-  function getStatus(test, result, cbc) {
-    const value = parseFloat(result);
+  function cancelSample(sampleId) {
+    const ok = window.confirm("Cancel this sample?");
+    if (!ok) return;
 
-    if (test === "Potassium" && !Number.isNaN(value)) {
-      if (value >= 6) return "Critical";
-      if (value >= 5.3) return "Review";
-      return "Normal";
-    }
-
-    if (test === "Creatinine" && !Number.isNaN(value)) {
-      if (value >= 2) return "Review";
-      return "Normal";
-    }
-
-    if (test === "Troponin" && !Number.isNaN(value)) {
-      if (value >= 0.1) return "Review";
-      return "Normal";
-    }
-
-    if (test === "CBC") {
-      const hb = parseFloat(cbc?.hb);
-      const platelets = parseFloat(cbc?.platelets);
-      const wbc = parseFloat(cbc?.wbc);
-      if (!Number.isNaN(hb) && hb < 7) return "Critical";
-      if (!Number.isNaN(hb) && hb < 10) return "Review";
-      if (!Number.isNaN(platelets) && platelets < 50) return "Review";
-      if (!Number.isNaN(wbc) && wbc > 20) return "Review";
-      return "Normal";
-    }
-
-    return "Normal";
-  }
-
-  function createCriticalAlert(resultItem) {
-    setCriticalAlerts((prev) => {
-      const exists = prev.some((item) => item.resultId === resultItem.id);
-      if (exists) return prev;
-      const newAlert = {
-        id: createId(),
-        resultId: resultItem.id,
-        mrn: resultItem.mrn,
-        patient: resultItem.patient,
-        test: resultItem.test,
-        result: resultItem.result,
-        status: resultItem.status,
-        createdAt: resultItem.createdAt,
-        acknowledged: false,
-        acknowledgedBy: "",
-        acknowledgedAt: "",
-        comment: resultItem.comment || "",
-      };
-      return [newAlert, ...prev];
-    });
-
-    addAuditLog("Critical Alert Created", `MRN ${resultItem.mrn} | ${resultItem.test} | Result ${resultItem.result}`);
-  }
-
-  function acknowledgeCriticalAlert(alertId) {
-    const alertItem = criticalAlerts.find((item) => item.id === alertId);
-    setCriticalAlerts((prev) =>
-      prev.map((item) =>
-        item.id === alertId
-          ? { ...item, acknowledged: true, acknowledgedBy: session?.name || "", acknowledgedAt: getNowDateTime() }
-          : item
+    setSamples((prev) =>
+      prev.map((s) =>
+        s.id === sampleId ? { ...s, cancelled: true, status: "Cancelled" } : s
       )
     );
 
-    if (alertItem) addAuditLog("Critical Alert Acknowledged", `MRN ${alertItem.mrn} | ${alertItem.test} acknowledged by doctor`);
-  }
-
-  function registerResultSave(newResult) {
-    setResults((prev) => [newResult, ...prev]);
-    if (newResult.status === "Critical") createCriticalAlert(newResult);
-
-    if (newResult.requestId) {
-      const targetSample = samples.find((item) => item.id === newResult.requestId);
-      if (targetSample) {
-        const completedTests = uniqueValues([...targetSample.completedTests, newResult.test]);
-        updateSampleStatus(newResult.requestId, {
-          completedTests,
-          inProgress: completedTests.length < targetSample.tests.length,
-        });
-      }
+    const sample = samples.find((s) => s.id === sampleId);
+    if (sample) {
+      addAudit("Sample Cancelled", `Barcode ${sample.barcode} | MRN ${sample.mrn}`);
     }
-
-    addAuditLog("Result Saved", `MRN ${newResult.mrn} | ${newResult.test} | ${newResult.status}`);
   }
 
-  function handleAddResult(e) {
+  /* ================================
+     RESULT ACTIONS
+  ================================= */
+  function handleSaveResult(e) {
     e.preventDefault();
     if (!canEnterResults) return;
 
-    if (!form.barcode || !form.mrn || !form.department || !form.patient || !form.test || !form.technician) {
+    if (
+      !manualForm.barcode ||
+      !manualForm.mrn ||
+      !manualForm.patient ||
+      !manualForm.department ||
+      !manualForm.test ||
+      !manualForm.result ||
+      !manualForm.technician
+    ) {
       alert("Please fill all required fields");
       return;
     }
 
-    if (form.test === "CBC") {
-      if (!form.cbc.wbc || !form.cbc.rbc || !form.cbc.hb || !form.cbc.platelets) {
-        alert("Please fill all CBC fields");
-        return;
-      }
-    } else if (!form.result) {
-      alert("Please enter the result");
-      return;
-    }
-
-    let finalResult = form.result;
-    if (form.test === "CBC") {
-      finalResult = `WBC: ${form.cbc.wbc} | RBC: ${form.cbc.rbc} | Hb: ${form.cbc.hb} | Platelets: ${form.cbc.platelets}`;
-    }
-
-    const status = getStatus(form.test, form.result, form.cbc);
+    const status = getStatus(manualForm.test, manualForm.result);
 
     const newResult = {
       id: createId(),
-      requestId: form.requestId,
-      barcode: form.barcode.trim(),
-      mrn: form.mrn.trim(),
-      department: form.department,
-      patient: form.patient.trim(),
-      test: form.test,
-      result: finalResult,
-      time: form.time || getNowTime(),
+      sampleId: manualForm.sampleId || "",
+      barcode: manualForm.barcode.trim(),
+      mrn: manualForm.mrn.trim(),
+      patient: manualForm.patient.trim(),
+      department: manualForm.department,
+      test: manualForm.test,
+      result: manualForm.result.trim(),
       status,
+      technician: manualForm.technician.trim(),
+      comment: manualForm.comment.trim(),
+      synced: false,
+      cancelled: false,
+      createdAt: now(),
       note: "Issued during LIS downtime",
-      technician: form.technician.trim(),
-      synced: false,
       source: "Manual Entry",
-      createdAt: getNowDateTime(),
-      comment: form.comment?.trim() || "",
-      cancelled: false,
-      cancelledBy: "",
-      cancelledAt: "",
-      editedAt: "",
-      editedBy: "",
     };
 
-    if (isDuplicateResult(newResult)) {
-      alert("Duplicate result detected for the same sample/test.");
+    if (resultExists(newResult)) {
+      alert("Duplicate result detected for this sample/test");
       return;
     }
 
-    registerResultSave(newResult);
-    setForm({ ...getDefaultManualForm(), technician: session.name });
-  }
+    const nextResults = [newResult, ...results];
+    setResults(nextResults);
+    refreshSamplesStatus(nextResults);
 
-  function parseValue(text, label) {
-    const regex = new RegExp(`${label}\\s*[:=]?\\s*([0-9.]+)`, "i");
-    const match = text.match(regex);
-    return match ? match[1] : "";
-  }
-
-  function extractFromOCR() {
-    if (!scanForm.ocrText.trim()) {
-      alert("Please paste OCR text first");
-      return;
+    if (status === "Critical") {
+      triggerCritical(newResult);
     }
 
-    const text = scanForm.ocrText;
+    addAudit(
+      "Result Saved",
+      `MRN ${newResult.mrn} | ${newResult.test} | ${newResult.status}`
+    );
 
-    if (scanForm.test === "CBC") {
-      const cbc = {
-        wbc: parseValue(text, "WBC"),
-        rbc: parseValue(text, "RBC"),
-        hb: parseValue(text, "HB"),
-        platelets: parseValue(text, "Platelets"),
-      };
-      const status = getStatus("CBC", "", cbc);
-      setExtractedData({
-        test: "CBC",
-        result: `WBC: ${cbc.wbc || "-"} | RBC: ${cbc.rbc || "-"} | Hb: ${cbc.hb || "-"} | Platelets: ${cbc.platelets || "-"}`,
-        cbc,
-        status,
-      });
-      return;
-    }
-
-    const singleResult =
-      parseValue(text, scanForm.test) ||
-      parseValue(text, scanForm.test.toUpperCase()) ||
-      parseValue(text, scanForm.test.toLowerCase());
-
-    const status = getStatus(scanForm.test, singleResult, null);
-    setExtractedData({ test: scanForm.test, result: singleResult || "", cbc: null, status });
+    setManualForm({
+      sampleId: "",
+      barcode: "",
+      mrn: "",
+      patient: "",
+      department: "",
+      test: "CBC",
+      result: "",
+      technician: session?.name || "",
+      comment: "",
+    });
   }
 
-  function handleScanFileChange(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (scanForm.filePreview) URL.revokeObjectURL(scanForm.filePreview);
-    const previewUrl = URL.createObjectURL(file);
-    setScanForm((prev) => ({ ...prev, fileName: file.name, filePreview: previewUrl, fileType: file.type }));
+  function markSynced(resultId) {
+    setResults((prev) =>
+      prev.map((r) =>
+        r.id === resultId
+          ? { ...r, synced: true, note: "Marked for LIS reconciliation" }
+          : r
+      )
+    );
+
+    const row = results.find((r) => r.id === resultId);
+    if (row) {
+      addAudit("Marked Synced", `MRN ${row.mrn} | ${row.test}`);
+    }
   }
 
-  function handleSaveScannedResult() {
-    if (!canEnterResults) return;
-
-    if (!scanForm.barcode || !scanForm.mrn || !scanForm.department || !scanForm.patient || !scanForm.test || !scanForm.technician) {
-      alert("Please fill all required fields");
-      return;
-    }
-    if (!extractedData) {
-      alert("Please extract results first");
-      return;
-    }
-
-    const newResult = {
-      id: createId(),
-      requestId: scanForm.requestId,
-      barcode: scanForm.barcode.trim(),
-      mrn: scanForm.mrn.trim(),
-      department: scanForm.department,
-      patient: scanForm.patient.trim(),
-      test: scanForm.test,
-      result: extractedData.result,
-      time: scanForm.time || getNowTime(),
-      status: extractedData.status,
-      note: "Extracted from scanned result sheet",
-      technician: scanForm.technician.trim(),
-      synced: false,
-      source: "Scanned Sheet",
-      createdAt: getNowDateTime(),
-      comment: scanForm.comment?.trim() || "",
-      cancelled: false,
-      cancelledBy: "",
-      cancelledAt: "",
-      editedAt: "",
-      editedBy: "",
-    };
-
-    if (isDuplicateResult(newResult)) {
-      alert("Duplicate result detected for the same sample/test.");
-      return;
-    }
-
-    registerResultSave(newResult);
-    if (scanForm.filePreview) URL.revokeObjectURL(scanForm.filePreview);
-    setScanForm({ ...getDefaultScanForm(), technician: session.name });
-    setExtractedData(null);
-  }
-
-  function handleSync(id) {
-    if (!canEnterResults) return;
-    const target = results.find((item) => item.id === id);
-    setResults((prev) => prev.map((item) => item.id === id ? { ...item, synced: true, note: "Marked for LIS reconciliation" } : item));
-    if (target) addAuditLog("Result Marked for LIS Entry", `MRN ${target.mrn} | ${target.test}`);
-  }
-
-  function startEditResult(item) {
+  function beginEditResult(item) {
     setEditingResultId(item.id);
-    setEditForm({ result: item.result, comment: item.comment || "", time: item.time || "", note: item.note || "" });
+    setEditForm({
+      result: item.result,
+      comment: item.comment || "",
+    });
   }
 
-  function saveEditedResult() {
+  function saveEditResult() {
     if (!editingResultId) return;
-    const target = results.find((item) => item.id === editingResultId);
+
+    const target = results.find((r) => r.id === editingResultId);
     if (!target) return;
+
     if (!editForm.result.trim()) {
       alert("Result cannot be empty");
       return;
     }
 
-    const updatedResultStatus = target.test === "CBC" ? target.status : getStatus(target.test, editForm.result.trim(), null);
+    const updatedStatus =
+      target.test === "Potassium"
+        ? getStatus(target.test, editForm.result)
+        : target.status;
 
-    setResults((prev) =>
-      prev.map((item) =>
-        item.id === editingResultId
-          ? {
-              ...item,
-              result: editForm.result.trim(),
-              comment: editForm.comment.trim(),
-              time: editForm.time.trim(),
-              note: editForm.note.trim(),
-              status: item.test === "CBC" ? item.status : updatedResultStatus,
-              editedAt: getNowDateTime(),
-              editedBy: session.name,
-            }
-          : item
-      )
+    const nextResults = results.map((r) =>
+      r.id === editingResultId
+        ? {
+            ...r,
+            result: editForm.result.trim(),
+            comment: editForm.comment.trim(),
+            status: updatedStatus,
+            editedAt: now(),
+            editedBy: session?.name || "",
+          }
+        : r
     );
 
-    if (updatedResultStatus === "Critical" && target.status !== "Critical") {
-      createCriticalAlert({
-        ...target,
-        result: editForm.result.trim(),
-        comment: editForm.comment.trim(),
-        status: updatedResultStatus,
-        createdAt: target.createdAt,
-      });
+    setResults(nextResults);
+
+    if (updatedStatus === "Critical" && target.status !== "Critical") {
+      const updatedItem = nextResults.find((r) => r.id === editingResultId);
+      if (updatedItem) triggerCritical(updatedItem);
     }
 
-    addAuditLog("Result Edited", `MRN ${target.mrn} | ${target.test}`);
-    setEditingResultId("");
+    addAudit("Result Edited", `MRN ${target.mrn} | ${target.test}`);
+    setEditingResultId(null);
   }
 
-  function handleCancelResult(item) {
-    if (!canManageResults) return;
+  function cancelResult(item) {
     const ok = window.confirm("Cancel this result?");
     if (!ok) return;
 
-    setResults((prev) =>
-      prev.map((resultItem) =>
-        resultItem.id === item.id
-          ? {
-              ...resultItem,
-              status: "Cancelled",
-              cancelled: true,
-              cancelledBy: session.name,
-              cancelledAt: getNowDateTime(),
-              note: "Result cancelled",
-              synced: false,
-            }
-          : resultItem
-      )
+    const nextResults = results.map((r) =>
+      r.id === item.id
+        ? {
+            ...r,
+            cancelled: true,
+            status: "Cancelled",
+            cancelledAt: now(),
+            cancelledBy: session?.name || "",
+            synced: false,
+            note: "Result cancelled",
+          }
+        : r
     );
 
-    if (item.requestId) {
-      const sample = samples.find((s) => s.id === item.requestId);
-      if (sample) {
-        const completedTests = sample.completedTests.filter((t) => t !== item.test);
-        updateSampleStatus(item.requestId, { completedTests, inProgress: false });
-      }
-    }
+    setResults(nextResults);
+    refreshSamplesStatus(nextResults);
 
-    addAuditLog("Result Cancelled", `MRN ${item.mrn} | ${item.test}`);
-  }
-
-  function handleCancelSample(sample) {
-    const ok = window.confirm("Cancel this sample request?");
-    if (!ok) return;
-    updateSampleStatus(sample.id, { cancelled: true, status: "Cancelled", inProgress: false });
-    addAuditLog("Sample Cancelled", `Barcode ${sample.barcode} | MRN ${sample.mrn}`);
-  }
-
-  function handlePrintSampleBarcode(sample) {
+    addAudit("Result Cancelled", `MRN ${item.mrn} | ${item.test}`);
+  }  /* ================================
+     PRINTING
+  ================================= */
+  function printSampleBarcode(sample) {
     const barcodeSvg = generateBarcodeSVG(sample.barcode || sample.mrn || sample.id);
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
+    const win = window.open("", "_blank");
+    if (!win) return;
 
-    printWindow.document.write(`
+    win.document.write(`
       <html>
         <head>
-          <title>Sample Barcode Label</title>
+          <title>Sample Barcode</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f8fafc; color: #0f172a; }
-            .label { width: 440px; border: 2px solid #0f172a; border-radius: 18px; background: #fff; padding: 18px; margin: 0 auto; box-sizing: border-box; }
-            .header { text-align: center; margin-bottom: 10px; }
-            .hospital { font-size: 12px; text-transform: uppercase; color: #475569; letter-spacing: 1px; }
-            .title { font-size: 22px; font-weight: bold; margin-top: 6px; }
-            .barcode-box { border: 1px solid #cbd5e1; border-radius: 12px; padding: 12px; background: #fff; text-align: center; margin: 14px 0 16px; }
-            .info-row { margin-bottom: 10px; font-size: 15px; }
-            .label-text { font-weight: bold; color: #475569; }
-            @media print { body { background: #fff; padding: 0; } .label { border: 1px solid #000; border-radius: 0; width: 100%; margin: 0; } }
+            body {
+              font-family: Arial, sans-serif;
+              padding: 20px;
+              color: #0f172a;
+              background: #f8fafc;
+            }
+            .label {
+              max-width: 460px;
+              margin: 0 auto;
+              background: white;
+              border: 2px solid #0f172a;
+              border-radius: 18px;
+              padding: 18px;
+            }
+            .title {
+              text-align: center;
+              font-size: 22px;
+              font-weight: bold;
+              margin-bottom: 10px;
+            }
+            .sub {
+              text-align: center;
+              color: #475569;
+              margin-bottom: 14px;
+            }
+            .barcode {
+              text-align: center;
+              margin: 14px 0 18px;
+              border: 1px solid #cbd5e1;
+              border-radius: 12px;
+              padding: 12px;
+            }
+            .row {
+              margin-bottom: 10px;
+              font-size: 15px;
+            }
+            .label-text {
+              font-weight: bold;
+              color: #475569;
+            }
           </style>
         </head>
         <body>
           <div class="label">
-            <div class="header">
-              <div class="hospital">${escapeHtml(HOSPITAL_NAME)}</div>
-              <div class="title">Sample Barcode Label</div>
-            </div>
-            <div class="barcode-box">${barcodeSvg}</div>
-            <div class="info-row"><span class="label-text">Patient:</span> ${escapeHtml(sample.patient || "-")}</div>
-            <div class="info-row"><span class="label-text">MRN:</span> ${escapeHtml(sample.mrn || "-")}</div>
-            <div class="info-row"><span class="label-text">Department:</span> ${escapeHtml(sample.department || "-")}</div>
-            <div class="info-row"><span class="label-text">Barcode:</span> ${escapeHtml(sample.barcode || "-")}</div>
-            <div class="info-row"><span class="label-text">Requested Tests:</span> ${escapeHtml((sample.tests || []).join(", ") || "-")}</div>
-            <div class="info-row"><span class="label-text">Status:</span> ${escapeHtml(sample.status || "-")}</div>
+            <div class="title">${escapeHtml(HOSPITAL_NAME)}</div>
+            <div class="sub">Sample Barcode Label</div>
+            <div class="barcode">${barcodeSvg}</div>
+            <div class="row"><span class="label-text">Patient:</span> ${escapeHtml(sample.patient || "-")}</div>
+            <div class="row"><span class="label-text">MRN:</span> ${escapeHtml(sample.mrn || "-")}</div>
+            <div class="row"><span class="label-text">Department:</span> ${escapeHtml(sample.department || "-")}</div>
+            <div class="row"><span class="label-text">Barcode:</span> ${escapeHtml(sample.barcode || "-")}</div>
+            <div class="row"><span class="label-text">Tests:</span> ${escapeHtml((sample.tests || []).join(", ") || "-")}</div>
+            <div class="row"><span class="label-text">Status:</span> ${escapeHtml(sample.status || "-")}</div>
           </div>
-          <script>window.onload = function () { window.print(); };</script>
+          <script>window.onload = function(){ window.print(); };</script>
         </body>
       </html>
     `);
 
-    printWindow.document.close();
-    addAuditLog("Barcode Printed", `Barcode ${sample.barcode} | MRN ${sample.mrn}`);
+    win.document.close();
+    addAudit("Barcode Printed", `Barcode ${sample.barcode} | MRN ${sample.mrn}`);
   }
 
-  function handlePrintResult(item) {
-    const reportWindow = window.open("", "_blank");
-    if (!reportWindow) return;
+  function printResult(item) {
+    const win = window.open("", "_blank");
+    if (!win) return;
 
-    const alertStatus = alertMapByResultId[item.id]
-      ? alertMapByResultId[item.id].acknowledged ? "Acknowledged" : "Pending"
-      : item.status === "Critical" ? "Pending" : "-";
+    const sample =
+      samples.find((s) => s.id === item.sampleId) ||
+      samples.find((s) => s.barcode === item.barcode);
 
-    const sample = samples.find((s) => s.id === item.requestId) || samples.find((s) => s.barcode === item.barcode);
+    const tat = formatTurnaround(getTurnaroundMinutes(sample, item));
+    const alertStatus = alerts.find((a) => a.resultId === item.id)
+      ? alerts.find((a) => a.resultId === item.id)?.seen
+        ? "Acknowledged"
+        : "Pending"
+      : item.status === "Critical"
+      ? "Pending"
+      : "-";
 
-    reportWindow.document.write(`
+    win.document.write(`
       <html>
         <head>
-          <title>${SYSTEM_NAME}</title>
+          <title>${escapeHtml(SYSTEM_NAME)}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 30px; color: #0f172a; }
             h1 { margin: 0 0 8px 0; font-size: 26px; }
             h2 { margin: 0; font-size: 16px; color: #475569; }
-            .top { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
             .box { border: 1px solid #cbd5e1; border-radius: 16px; padding: 20px; margin-top: 20px; }
             .label { color: #475569; font-weight: bold; }
             .note { margin-top: 20px; color: #b45309; }
           </style>
         </head>
         <body>
-          <div class="top">
-            <div>
-              <h2>${HOSPITAL_NAME}</h2>
-              <h1>${SYSTEM_NAME}</h1>
-            </div>
-          </div>
+          <h2>${escapeHtml(HOSPITAL_NAME)}</h2>
+          <h1>${escapeHtml(SYSTEM_NAME)}</h1>
           <p>This result was issued during LIS downtime.</p>
+
           <div class="box">
             <p><span class="label">Barcode:</span> ${escapeHtml(item.barcode)}</p>
             <p><span class="label">MRN:</span> ${escapeHtml(item.mrn)}</p>
@@ -1241,8 +678,1443 @@ export default function App() {
             <p><span class="label">Result:</span> ${escapeHtml(item.result)}</p>
             <p><span class="label">Status:</span> ${escapeHtml(item.status)}</p>
             <p><span class="label">Alert Status:</span> ${escapeHtml(alertStatus)}</p>
-            <p><span class="label">Time:</span> ${escapeHtml(item.time)}</p>
             <p><span class="label">Created At:</span> ${escapeHtml(item.createdAt || "-")}</p>
-            <p><span class="label">TAT:</span> ${escapeHtml(formatTurnaround(getTurnaroundMinutes(sample, item)))}</p>
-            <p><span class="label">Technician:</span> ${escapeHtml(item.technician)}</p>
-            <p><span class="lab
+            <p><span class="label">TAT:</span> ${escapeHtml(tat)}</p>
+            <p><span class="label">Technician:</span> ${escapeHtml(item.technician || "-")}</p>
+            <p><span class="label">Source:</span> ${escapeHtml(item.source || "-")}</p>
+            <p><span class="label">Note:</span> ${escapeHtml(item.note || "-")}</p>
+            <p><span class="label">Comment:</span> ${escapeHtml(item.comment || "-")}</p>
+          </div>
+
+          <p class="note">Pending official LIS verification if not yet synchronized.</p>
+        </body>
+      </html>
+    `);
+
+    win.document.close();
+    win.print();
+  }
+
+  /* ================================
+     DERIVED DATA
+  ================================= */
+  const pendingAlerts = useMemo(
+    () => alerts.filter((a) => !a.seen),
+    [alerts]
+  );
+
+  const visibleResults = useMemo(() => {
+    let rows = [...results];
+
+    if (session?.role === "Doctor") {
+      if (!searchMrn.trim()) return [];
+      rows = rows.filter((r) =>
+        r.mrn.toLowerCase().includes(searchMrn.trim().toLowerCase())
+      );
+    }
+
+    if (filters.department) {
+      rows = rows.filter((r) => r.department === filters.department);
+    }
+    if (filters.test) {
+      rows = rows.filter((r) => r.test === filters.test);
+    }
+    if (filters.resultStatus) {
+      rows = rows.filter((r) => r.status === filters.resultStatus);
+    }
+    if (filters.syncStatus) {
+      rows = rows.filter((r) =>
+        filters.syncStatus === "Synced" ? r.synced : !r.synced
+      );
+    }
+    if (filters.alertStatus) {
+      rows = rows.filter((r) => {
+        const alert = alerts.find((a) => a.resultId === r.id);
+        const value = alert ? (alert.seen ? "Acknowledged" : "Pending") : "None";
+        return value === filters.alertStatus;
+      });
+    }
+
+    return rows.map((r) => {
+      const sample =
+        samples.find((s) => s.id === r.sampleId) ||
+        samples.find((s) => s.barcode === r.barcode);
+      const tatMinutes = getTurnaroundMinutes(sample, r);
+      const alert = alerts.find((a) => a.resultId === r.id);
+
+      return {
+        ...r,
+        tatMinutes,
+        tatLabel: formatTurnaround(tatMinutes),
+        alertStatus: alert ? (alert.seen ? "Acknowledged" : "Pending") : "None",
+        alertObj: alert || null,
+      };
+    });
+  }, [results, session, searchMrn, filters, alerts, samples]);
+
+  const visibleSamples = useMemo(() => {
+    let rows = [...samples];
+
+    if (filters.department) {
+      rows = rows.filter((s) => s.department === filters.department);
+    }
+    if (filters.sampleStatus) {
+      rows = rows.filter((s) => s.status === filters.sampleStatus);
+    }
+    if (filters.test) {
+      rows = rows.filter((s) => s.tests.includes(filters.test));
+    }
+
+    return rows;
+  }, [samples, filters]);
+
+  const criticalCount = results.filter((r) => r.status === "Critical" && !r.cancelled).length;
+  const pendingSyncCount = results.filter((r) => !r.synced && !r.cancelled).length;
+  const completedSamplesCount = samples.filter((s) => s.status === "Completed").length;
+  const activeSamplesCount = samples.filter(
+    (s) => s.status !== "Completed" && s.status !== "Cancelled"
+  ).length;
+
+  const avgTat = useMemo(() => {
+    const values = results
+      .filter((r) => !r.cancelled)
+      .map((r) => {
+        const sample =
+          samples.find((s) => s.id === r.sampleId) ||
+          samples.find((s) => s.barcode === r.barcode);
+        return getTurnaroundMinutes(sample, r);
+      })
+      .filter((v) => v != null);
+
+    if (!values.length) return null;
+    return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  }, [results, samples]);
+
+  const maxTat = useMemo(() => {
+    const values = results
+      .filter((r) => !r.cancelled)
+      .map((r) => {
+        const sample =
+          samples.find((s) => s.id === r.sampleId) ||
+          samples.find((s) => s.barcode === r.barcode);
+        return getTurnaroundMinutes(sample, r);
+      })
+      .filter((v) => v != null);
+
+    return values.length ? Math.max(...values) : null;
+  }, [results, samples]);
+
+  const completionRate = samples.length
+    ? Math.round((completedSamplesCount / samples.length) * 100)
+    : 0;
+
+  function markAlertSeen(alertId) {
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === alertId ? { ...a, seen: true, seenAt: now() } : a))
+    );
+
+    const row = alerts.find((a) => a.id === alertId);
+    if (row) {
+      addAudit("Critical Alert Acknowledged", `MRN ${row.mrn}`);
+    }
+  }
+
+  /* ================================
+     LOGIN VIEW
+  ================================= */
+  if (!session) {
+    return (
+      <div style={loginPageStyle}>
+        <div style={loginCardStyle}>
+          <div style={loginHeaderStyle}>
+            <div style={{ flex: 1 }}>
+              <div style={loginHospitalNameStyle}>{HOSPITAL_NAME}</div>
+              <h1 style={loginTitleStyle}>{SYSTEM_NAME}</h1>
+              <p style={loginSubtitleStyle}>
+                Prototype access for downtime result handling during LIS maintenance.
+              </p>
+            </div>
+          </div>
+
+          <div style={demoBoxStyle}>
+            <div style={{ fontWeight: "bold", marginBottom: 8 }}>Prototype Demo Accounts</div>
+            <div>Admin: <strong>admin</strong> / 1234</div>
+            <div>Doctor: <strong>doctor</strong> / 1234</div>
+            <div>Lab: <strong>lab</strong> / 1234</div>
+            <div>Reception: <strong>reception</strong> / 1234</div>
+          </div>
+
+          <form onSubmit={handleLogin}>
+            <div style={{ marginBottom: 14 }}>
+              <label>Username</label>
+              <input
+                value={loginForm.username}
+                onChange={(e) =>
+                  setLoginForm((prev) => ({ ...prev, username: e.target.value }))
+                }
+                style={inputStyle}
+                placeholder="admin, doctor, or lab"
+              />
+            </div>
+
+            <div style={{ marginBottom: 18 }}>
+              <label>Password</label>
+              <input
+                type="password"
+                value={loginForm.password}
+                onChange={(e) =>
+                  setLoginForm((prev) => ({ ...prev, password: e.target.value }))
+                }
+                style={inputStyle}
+                placeholder="Enter password"
+              />
+            </div>
+
+            {loginError && <div style={errorBoxStyle}>{loginError}</div>}
+
+            <button type="submit" style={buttonStyle}>
+              Login
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  /* ================================
+     MAIN UI START
+  ================================= */
+  return (
+    <div style={pageStyle}>
+      <audio ref={audioRef}>
+        <source src="data:audio/wav;base64,UklGRlQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YTAAAAAA////AAAA////AAAA////AAAA" type="audio/wav" />
+      </audio>
+
+      <div style={{ maxWidth: "1550px", margin: "0 auto" }}>
+        {session.role === "Doctor" && pendingAlerts.length > 0 && (
+          <div style={criticalAlertOverlayStyle}>
+            <div style={criticalAlertBoxStyle}>
+              <div style={criticalAlertHeaderStyle}>
+                <div>
+                  <div style={criticalAlertTitleStyle}>Critical Results Alerts</div>
+                  <div style={{ color: "#475569", marginTop: 4 }}>
+                    Please review and acknowledge the following critical results.
+                  </div>
+                </div>
+                <div style={criticalAlertCounterStyle}>
+                  {pendingAlerts.length} alert{pendingAlerts.length > 1 ? "s" : ""}
+                </div>
+              </div>
+
+              <div style={criticalAlertListStyle}>
+                {pendingAlerts.map((alertItem) => (
+                  <div key={alertItem.id} style={criticalAlertItemStyle}>
+                    <div style={criticalAlertItemTopStyle}>
+                      <div style={{ fontWeight: "bold", color: "#7f1d1d", fontSize: 18 }}>
+                        نتيجة حرجة للمريض رقم {alertItem.mrn}
+                      </div>
+                      <button
+                        type="button"
+                        style={smallButtonOrange}
+                        onClick={() => markAlertSeen(alertItem.id)}
+                      >
+                        تم الاطلاع
+                      </button>
+                    </div>
+
+                    <div style={criticalAlertDetailsStyle}>
+                      <div><strong>MRN:</strong> {alertItem.mrn}</div>
+                      <div><strong>Patient:</strong> {alertItem.patient || "-"}</div>
+                      <div><strong>Time:</strong> {alertItem.createdAt || "-"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={topBannerStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "18px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <div style={topHospitalNameStyle}>{HOSPITAL_NAME}</div>
+              <h1 style={topSystemNameStyle}>{SYSTEM_NAME}</h1>
+              <div style={topSubTextStyle}>
+                Prototype workflow for temporary reporting during LIS downtime
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", alignItems: "flex-end" }}>
+              <div style={statusPillStyle}>LIS Status: Scheduled Maintenance Window</div>
+              <div style={loggedUserStyle}>
+                Logged in as <strong>{session.name}</strong> ({session.role})
+              </div>
+            </div>
+          </div>
+
+          <div style={headerButtonsRowStyle}>
+            <button type="button" onClick={handleExportCSV} style={smallButtonGreen}>
+              Export CSV
+            </button>
+            <button type="button" onClick={openImportDialog} style={smallButtonPurple}>
+              Import CSV
+            </button>
+            <button type="button" onClick={resetAllSavedData} style={smallButtonOrange}>
+              Reset Saved Data
+            </button>
+            <button type="button" onClick={handleLogout} style={smallButtonGray}>
+              Logout
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportCSV}
+              style={{ display: "none" }}
+            />
+          </div>
+        </div>
+
+        <div style={{ ...panelStyle, marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ marginTop: 0, marginBottom: 6 }}>
+                {session.role === "Admin" ? "Admin Dashboard" : "Filters & Overview"}
+              </h2>
+              <p style={{ color: "#64748b", margin: 0 }}>
+                Quick monitoring cards and advanced filters.
+              </p>
+            </div>
+
+            {session.role === "Doctor" ? (
+              <input
+                value={searchMrn}
+                onChange={(e) => setSearchMrn(e.target.value)}
+                style={{ ...inputStyle, width: 300, marginBottom: 0 }}
+                placeholder="Search by patient MRN only..."
+              />
+            ) : (
+              <input
+                value={searchMrn}
+                onChange={(e) => setSearchMrn(e.target.value)}
+                style={{ ...inputStyle, width: 300, marginBottom: 0 }}
+                placeholder="Optional MRN search..."
+              />
+            )}
+          </div>
+
+          <div style={dashboardGridStyle}>
+            <div style={cardStyle}>
+              <div style={metricLabelStyle}>Total Samples</div>
+              <div style={metricValueStyle}>{samples.length}</div>
+            </div>
+            <div style={cardStyle}>
+              <div style={metricLabelStyle}>Active Samples</div>
+              <div style={metricValueStyle}>{activeSamplesCount}</div>
+            </div>
+            <div style={cardStyle}>
+              <div style={metricLabelStyle}>Completed Samples</div>
+              <div style={metricValueStyle}>{completedSamplesCount}</div>
+            </div>
+            <div style={{ ...cardStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
+              <div style={{ ...metricLabelStyle, color: "#b91c1c" }}>Critical Results</div>
+              <div style={{ ...metricValueStyle, color: "#b91c1c" }}>{criticalCount}</div>
+            </div>
+            <div style={{ ...cardStyle, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+              <div style={{ ...metricLabelStyle, color: "#1d4ed8" }}>Pending Reconciliation</div>
+              <div style={{ ...metricValueStyle, color: "#1d4ed8" }}>{pendingSyncCount}</div>
+            </div>
+            <div style={{ ...cardStyle, background: "#fff7ed", border: "1px solid #fed7aa" }}>
+              <div style={{ ...metricLabelStyle, color: "#c2410c" }}>Pending Doctor Alerts</div>
+              <div style={{ ...metricValueStyle, color: "#c2410c" }}>{pendingAlerts.length}</div>
+            </div>
+            <div style={{ ...cardStyle, background: "#ecfeff", border: "1px solid #a5f3fc" }}>
+              <div style={{ ...metricLabelStyle, color: "#0f766e" }}>Average TAT</div>
+              <div style={{ ...metricValueStyle, color: "#0f766e" }}>{formatTurnaround(avgTat)}</div>
+            </div>
+            <div style={{ ...cardStyle, background: "#fdf4ff", border: "1px solid #f5d0fe" }}>
+              <div style={{ ...metricLabelStyle, color: "#a21caf" }}>Max TAT</div>
+              <div style={{ ...metricValueStyle, color: "#a21caf" }}>{formatTurnaround(maxTat)}</div>
+            </div>
+            <div style={{ ...cardStyle, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+              <div style={{ ...metricLabelStyle, color: "#166534" }}>Sample Completion Rate</div>
+              <div style={{ ...metricValueStyle, color: "#166534" }}>{completionRate}%</div>
+            </div>
+          </div>
+
+          <div style={filtersGridStyle}>
+            <div>
+              <label>Department</label>
+              <select
+                value={filters.department}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, department: e.target.value }))
+                }
+                style={inputStyle}
+              >
+                <option value="">All</option>
+                {DEPARTMENT_OPTIONS.map((department) => (
+                  <option key={department} value={department}>{department}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Test</label>
+              <select
+                value={filters.test}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, test: e.target.value }))
+                }
+                style={inputStyle}
+              >
+                <option value="">All</option>
+                {TEST_OPTIONS.map((test) => (
+                  <option key={test} value={test}>{test}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Result Status</label>
+              <select
+                value={filters.resultStatus}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, resultStatus: e.target.value }))
+                }
+                style={inputStyle}
+              >
+                <option value="">All</option>
+                {RESULT_STATUS_OPTIONS.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Sync</label>
+              <select
+                value={filters.syncStatus}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, syncStatus: e.target.value }))
+                }
+                style={inputStyle}
+              >
+                <option value="">All</option>
+                <option value="Synced">Synced</option>
+                <option value="Pending">Pending</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Alert Status</label>
+              <select
+                value={filters.alertStatus}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, alertStatus: e.target.value }))
+                }
+                style={inputStyle}
+              >
+                <option value="">All</option>
+                <option value="Pending">Pending</option>
+                <option value="Acknowledged">Acknowledged</option>
+                <option value="None">None</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Sample Status</label>
+              <select
+                value={filters.sampleStatus}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, sampleStatus: e.target.value }))
+                }
+                style={inputStyle}
+              >
+                <option value="">All</option>
+                {SAMPLE_STATUS_OPTIONS.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              canEnterResults || session.role === "Admin" ? "1.15fr 1.85fr" : "1fr",
+            gap: "24px",
+          }}
+        >
+          {(canReceiveSamples || session.role === "Admin") && (
+            <div style={panelStyle}>
+              <h2 style={{ marginTop: 0 }}>
+                {canReceiveSamples ? "Sample Reception Entry" : "Samples Overview"}
+              </h2>
+              <p style={{ color: "#64748b" }}>
+                Register patient demographics, requested tests, print barcode labels, and track sample status.
+              </p>
+
+              {canReceiveSamples && (
+                <form onSubmit={handleAddSample}>
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Barcode</label>
+                    <input
+                      value={sampleForm.barcode}
+                      onChange={(e) =>
+                        setSampleForm((prev) => ({ ...prev, barcode: e.target.value }))
+                      }
+                      style={inputStyle}
+                      placeholder="Scan barcode"
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <label>MRN</label>
+                    <input
+                      value={sampleForm.mrn}
+                      onChange={(e) =>
+                        setSampleForm((prev) => ({ ...prev, mrn: e.target.value }))
+                      }
+                      style={inputStyle}
+                      placeholder="Patient MRN"
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Department</label>
+                    <select
+                      value={sampleForm.department}
+                      onChange={(e) =>
+                        setSampleForm((prev) => ({ ...prev, department: e.target.value }))
+                      }
+                      style={inputStyle}
+                    >
+                      <option value="">Select department</option>
+                      {DEPARTMENT_OPTIONS.map((department) => (
+                        <option key={department} value={department}>
+                          {department}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Patient Name</label>
+                    <input
+                      value={sampleForm.patient}
+                      onChange={(e) =>
+                        setSampleForm((prev) => ({ ...prev, patient: e.target.value }))
+                      }
+                      style={inputStyle}
+                      placeholder="Patient name"
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Requested Tests</label>
+                    <div style={checkboxGridStyle}>
+                      {TEST_OPTIONS.map((test) => (
+                        <label key={test} style={checkboxItemStyle}>
+                          <input
+                            type="checkbox"
+                            checked={sampleForm.tests.includes(test)}
+                            onChange={() => toggleSampleTest(test)}
+                          />
+                          <span>{test}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label>Received By</label>
+                    <input
+                      value={sampleForm.receivedBy}
+                      onChange={(e) =>
+                        setSampleForm((prev) => ({ ...prev, receivedBy: e.target.value }))
+                      }
+                      style={inputStyle}
+                      placeholder="Reception staff name"
+                    />
+                  </div>
+
+                  <button type="submit" style={buttonStyle}>
+                    Save Sample Request
+                  </button>
+                </form>
+              )}
+
+              <div style={{ marginTop: 24 }}>
+                <h3 style={{ marginBottom: 12 }}>Samples</h3>
+
+                {visibleSamples.length === 0 ? (
+                  <div style={infoBoxStyle}>No samples found.</div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ background: "#f8fafc" }}>
+                          <th style={thStyle}>Barcode</th>
+                          <th style={thStyle}>MRN</th>
+                          <th style={thStyle}>Department</th>
+                          <th style={thStyle}>Patient</th>
+                          <th style={thStyle}>Tests</th>
+                          <th style={thStyle}>Status</th>
+                          <th style={thStyle}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleSamples.map((sample) => {
+                          const linkedResults = results.filter(
+                            (r) => !r.cancelled && r.sampleId === sample.id
+                          );
+                          const completedTests = linkedResults.map((r) => r.test);
+                          const remainingTests = sample.tests.filter(
+                            (t) => !completedTests.includes(t)
+                          );
+
+                          return (
+                            <tr key={sample.id}>
+                              <td style={tdStyle}>{sample.barcode}</td>
+                              <td style={tdStyle}>{sample.mrn}</td>
+                              <td style={tdStyle}>{sample.department || "-"}</td>
+                              <td style={tdStyle}>{sample.patient}</td>
+                              <td style={tdStyle}>
+                                <div>{sample.tests.join(", ")}</div>
+                                {remainingTests.length > 0 && (
+                                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                                    Remaining: {remainingTests.join(", ")}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={tdStyle}>
+                                <span
+                                  style={{
+                                    ...sampleStatusStyle(sample.status),
+                                    borderRadius: 999,
+                                    padding: "6px 12px",
+                                    fontSize: 12,
+                                    fontWeight: "bold",
+                                    display: "inline-block",
+                                  }}
+                                >
+                                  {sample.status}
+                                </span>
+                              </td>
+                              <td style={tdStyle}>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  <button
+                                    type="button"
+                                    style={smallButtonBlue}
+                                    onClick={() => printSampleBarcode(sample)}
+                                  >
+                                    Print Barcode
+                                  </button>
+
+                                  {canEnterResults &&
+                                    sample.status !== "Completed" &&
+                                    sample.status !== "Cancelled" && (
+                                      <button
+                                        type="button"
+                                        style={smallButtonPurple}
+                                        onClick={() => loadSampleToManual(sample)}
+                                      >
+                                        Load to Lab
+                                      </button>
+                                    )}
+
+                                  {canReceiveSamples &&
+                                    sample.status !== "Completed" &&
+                                    sample.status !== "Cancelled" && (
+                                      <button
+                                        type="button"
+                                        style={smallButtonOrange}
+                                        onClick={() => cancelSample(sample.id)}
+                                      >
+                                        Cancel
+                                      </button>
+                                    )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {canViewResultsPanel && (
+            <div style={panelStyle}>
+              <h2 style={{ marginTop: 0 }}>
+                {session.role === "Doctor"
+                  ? "Doctor Results Portal"
+                  : session.role === "Lab"
+                  ? "Lab Results Entry & Review"
+                  : "Results Overview"}
+              </h2>
+
+              <p style={{ color: "#64748b" }}>
+                {session.role === "Doctor"
+                  ? "Search by MRN to review results, critical alerts, comments, and turnaround time."
+                  : "Enter results, review sync status, edit or cancel results, and monitor alerts."}
+              </p>
+
+              {canEnterResults && (
+                <div style={{ ...reviewCardStyle, marginBottom: 18 }}>
+                  <div style={{ fontWeight: "bold", marginBottom: 10 }}>Manual Result Entry</div>
+
+                  <form onSubmit={handleSaveResult}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
+                      <div>
+                        <label>Barcode</label>
+                        <input
+                          value={manualForm.barcode}
+                          onChange={(e) =>
+                            setManualForm((prev) => ({ ...prev, barcode: e.target.value }))
+                          }
+                          style={inputStyle}
+                          placeholder="Barcode"
+                        />
+                      </div>
+
+                      <div>
+                        <label>MRN</label>
+                        <input
+                          value={manualForm.mrn}
+                          onChange={(e) =>
+                            setManualForm((prev) => ({ ...prev, mrn: e.target.value }))
+                          }
+                          style={inputStyle}
+                          placeholder="MRN"
+                        />
+                      </div>
+
+                      <div>
+                        <label>Patient Name</label>
+                        <input
+                          value={manualForm.patient}
+                          onChange={(e) =>
+                            setManualForm((prev) => ({ ...prev, patient: e.target.value }))
+                          }
+                          style={inputStyle}
+                          placeholder="Patient Name"
+                        />
+                      </div>
+
+                      <div>
+                        <label>Department</label>
+                        <select
+                          value={manualForm.department}
+                          onChange={(e) =>
+                            setManualForm((prev) => ({ ...prev, department: e.target.value }))
+                          }
+                          style={inputStyle}
+                        >
+                          <option value="">Select department</option>
+                          {DEPARTMENT_OPTIONS.map((department) => (
+                            <option key={department} value={department}>
+                              {department}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label>Test</label>
+                        <select
+                          value={manualForm.test}
+                          onChange={(e) =>
+                            setManualForm((prev) => ({ ...prev, test: e.target.value }))
+                          }
+                          style={inputStyle}
+                        >
+                          {TEST_OPTIONS.map((test) => (
+                            <option key={test} value={test}>
+                              {test}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label>Result</label>
+                        <input
+                          value={manualForm.result}
+                          onChange={(e) =>
+                            setManualForm((prev) => ({ ...prev, result: e.target.value }))
+                          }
+                          style={inputStyle}
+                          placeholder="Enter result"
+                        />
+                      </div>
+
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <label>Technician</label>
+                        <input
+                          value={manualForm.technician}
+                          onChange={(e) =>
+                            setManualForm((prev) => ({ ...prev, technician: e.target.value }))
+                          }
+                          style={inputStyle}
+                          placeholder="Technician name"
+                        />
+                      </div>
+
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <label>Comment / Note (Optional)</label>
+                        <textarea
+                          value={manualForm.comment}
+                          onChange={(e) =>
+                            setManualForm((prev) => ({ ...prev, comment: e.target.value }))
+                          }
+                          style={{ ...inputStyle, minHeight: 90, resize: "vertical" }}
+                          placeholder="Optional comment for doctor or audit trail"
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 14 }}>
+                      <button type="submit" style={buttonStyleInline}>
+                        Save Result
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {editingResultId && (
+                <div style={editBoxStyle}>
+                  <h3 style={{ marginTop: 0 }}>Edit Result</h3>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Result</label>
+                    <textarea
+                      value={editForm.result}
+                      onChange={(e) =>
+                        setEditForm((prev) => ({ ...prev, result: e.target.value }))
+                      }
+                      style={{ ...inputStyle, minHeight: 90, resize: "vertical" }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label>Comment</label>
+                    <textarea
+                      value={editForm.comment}
+                      onChange={(e) =>
+                        setEditForm((prev) => ({ ...prev, comment: e.target.value }))
+                      }
+                      style={{ ...inputStyle, minHeight: 90, resize: "vertical" }}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button type="button" style={smallButtonGreen} onClick={saveEditResult}>
+                      Save Edit
+                    </button>
+                    <button type="button" style={smallButtonGray} onClick={() => setEditingResultId(null)}>
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ overflowX: "auto", marginTop: 20 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc" }}>
+                      <th style={thStyle}>Barcode</th>
+                      <th style={thStyle}>MRN</th>
+                      <th style={thStyle}>Department</th>
+                      <th style={thStyle}>Patient</th>
+                      <th style={thStyle}>Test</th>
+                      <th style={thStyle}>Result</th>
+                      <th style={thStyle}>Status</th>
+                      <th style={thStyle}>Alert</th>
+                      <th style={thStyle}>Sync</th>
+                      <th style={thStyle}>Created At</th>
+                      <th style={thStyle}>TAT</th>
+                      <th style={thStyle}>Technician</th>
+                      <th style={thStyle}>Comment</th>
+                      <th style={thStyle}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleResults.map((item) => (
+                      <tr key={item.id} style={item.status === "Critical" ? criticalRowStyle : undefined}>
+                        <td style={tdStyle}>{item.barcode}</td>
+                        <td style={tdStyle}>{item.mrn}</td>
+                        <td style={tdStyle}>{item.department || "-"}</td>
+                        <td style={tdStyle}>{item.patient}</td>
+                        <td style={tdStyle}>{item.test}</td>
+                        <td style={tdStyle}>{item.result}</td>
+                        <td style={tdStyle}>
+                          <span
+                            style={{
+                              ...badgeStyle(item.status),
+                              borderRadius: 999,
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              fontWeight: "bold",
+                              display: "inline-block",
+                            }}
+                          >
+                            {item.status}
+                          </span>
+                        </td>
+                        <td style={tdStyle}>
+                          <span
+                            style={{
+                              ...(item.alertStatus === "Pending"
+                                ? badgeStyle("Critical")
+                                : item.alertStatus === "Acknowledged"
+                                ? syncBadgeStyle(true)
+                                : {
+                                    background: "#f8fafc",
+                                    color: "#475569",
+                                    border: "1px solid #e2e8f0",
+                                  }),
+                              borderRadius: 999,
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              fontWeight: "bold",
+                              display: "inline-block",
+                            }}
+                          >
+                            {item.alertStatus}
+                          </span>
+                        </td>
+                        <td style={tdStyle}>
+                          <span
+                            style={{
+                              ...syncBadgeStyle(item.synced),
+                              borderRadius: 999,
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              fontWeight: "bold",
+                              display: "inline-block",
+                            }}
+                          >
+                            {item.synced ? "Synced" : "Pending"}
+                          </span>
+                        </td>
+                        <td style={tdStyle}>{item.createdAt || "-"}</td>
+                        <td style={{ ...tdStyle, ...tatStyle(item.tatMinutes) }}>
+                          {item.tatLabel}
+                        </td>
+                        <td style={tdStyle}>{item.technician || "-"}</td>
+                        <td style={tdStyle}>{item.comment || "-"}</td>
+                        <td style={tdStyle}>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            {!item.synced && canEnterResults && !item.cancelled && (
+                              <button
+                                type="button"
+                                style={smallButtonBlue}
+                                onClick={() => markSynced(item.id)}
+                              >
+                                Mark Sync
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              style={smallButtonGray}
+                              onClick={() => printResult(item)}
+                            >
+                              Print
+                            </button>
+
+                            {canManageResults && !item.cancelled && (
+                              <>
+                                <button
+                                  type="button"
+                                  style={smallButtonPurple}
+                                  onClick={() => beginEditResult(item)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  style={smallButtonOrange}
+                                  onClick={() => cancelResult(item)}
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            )}
+
+                            {session.role === "Doctor" &&
+                              item.alertObj &&
+                              !item.alertObj.seen && (
+                                <button
+                                  type="button"
+                                  style={smallButtonOrange}
+                                  onClick={() => markAlertSeen(item.alertObj.id)}
+                                >
+                                  تم الاطلاع
+                                </button>
+                              )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={aiNoteStyle}>
+                <strong>Prototype Notice:</strong> data is stored locally in this browser,
+                with critical alerts, barcode printing, multi-test samples, audit trail,
+                TAT KPI monitoring, and controlled result edit/cancel workflow.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================
+   STYLES
+================================ */
+const pageStyle = {
+  minHeight: "100vh",
+  background: "linear-gradient(180deg, #eef4fb 0%, #f8fafc 40%, #f8fafc 100%)",
+  padding: "24px",
+  fontFamily: "Arial, sans-serif",
+};
+
+const panelStyle = {
+  background: "rgba(255,255,255,0.97)",
+  border: "1px solid #dbe4f0",
+  borderRadius: "24px",
+  padding: "24px",
+  boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)",
+};
+
+const topBannerStyle = {
+  background: "linear-gradient(135deg, #0b1f3a 0%, #123a6b 60%, #1d4f91 100%)",
+  color: "white",
+  borderRadius: "26px",
+  padding: "22px 24px",
+  marginBottom: "24px",
+  boxShadow: "0 14px 36px rgba(15, 23, 42, 0.18)",
+  border: "1px solid rgba(255,255,255,0.08)",
+};
+
+const topHospitalNameStyle = {
+  fontSize: "13px",
+  letterSpacing: "1px",
+  textTransform: "uppercase",
+  opacity: 0.82,
+  marginBottom: "6px",
+};
+
+const topSystemNameStyle = {
+  margin: 0,
+  fontSize: "34px",
+  lineHeight: 1.15,
+};
+
+const topSubTextStyle = {
+  marginTop: "8px",
+  fontSize: "14px",
+  opacity: 0.92,
+};
+
+const statusPillStyle = {
+  background: "rgba(220, 38, 38, 0.18)",
+  color: "#fee2e2",
+  border: "1px solid rgba(254, 202, 202, 0.35)",
+  padding: "10px 14px",
+  borderRadius: "999px",
+  fontWeight: "bold",
+  fontSize: "13px",
+};
+
+const loggedUserStyle = {
+  background: "rgba(255,255,255,0.1)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  padding: "8px 12px",
+  borderRadius: "14px",
+  fontSize: "13px",
+};
+
+const headerButtonsRowStyle = {
+  display: "flex",
+  gap: 12,
+  alignItems: "center",
+  flexWrap: "wrap",
+  marginTop: 18,
+};
+
+const loginPageStyle = {
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "linear-gradient(180deg, #eef4fb 0%, #e2e8f0 100%)",
+  padding: 24,
+  fontFamily: "Arial, sans-serif",
+};
+
+const loginCardStyle = {
+  width: "100%",
+  maxWidth: 560,
+  background: "rgba(255,255,255,0.98)",
+  border: "1px solid #dbe4f0",
+  borderRadius: 28,
+  padding: 28,
+  boxShadow: "0 20px 50px rgba(15, 23, 42, 0.1)",
+};
+
+const loginHeaderStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 16,
+  marginBottom: 22,
+  flexWrap: "wrap",
+};
+
+const loginHospitalNameStyle = {
+  fontSize: 13,
+  color: "#475569",
+  fontWeight: "bold",
+  textTransform: "uppercase",
+  letterSpacing: "0.8px",
+  marginBottom: 6,
+};
+
+const loginTitleStyle = {
+  margin: 0,
+  fontSize: 34,
+  color: "#0f172a",
+};
+
+const loginSubtitleStyle = {
+  color: "#475569",
+  marginTop: 10,
+  marginBottom: 0,
+};
+
+const demoBoxStyle = {
+  background: "#eff6ff",
+  border: "1px solid #bfdbfe",
+  color: "#1e3a8a",
+  borderRadius: 16,
+  padding: 14,
+  marginBottom: 18,
+  lineHeight: 1.7,
+};
+
+const errorBoxStyle = {
+  background: "#fef2f2",
+  border: "1px solid #fecaca",
+  color: "#b91c1c",
+  borderRadius: 12,
+  padding: 12,
+  marginBottom: 14,
+};
+
+const inputStyle = {
+  width: "100%",
+  padding: "12px 14px",
+  marginTop: "6px",
+  borderRadius: "12px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+};
+
+const buttonStyle = {
+  width: "100%",
+  padding: "14px",
+  background: "#0f172a",
+  color: "white",
+  border: "none",
+  borderRadius: "12px",
+  fontWeight: "bold",
+  cursor: "pointer",
+};
+
+const buttonStyleInline = {
+  padding: "12px 16px",
+  background: "#0f172a",
+  color: "white",
+  border: "none",
+  borderRadius: "12px",
+  fontWeight: "bold",
+  cursor: "pointer",
+};
+
+const smallButtonBlue = {
+  padding: "8px 12px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: "bold",
+};
+
+const smallButtonGray = {
+  padding: "8px 12px",
+  background: "#475569",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: "bold",
+};
+
+const smallButtonOrange = {
+  padding: "8px 12px",
+  background: "#ea580c",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: "bold",
+};
+
+const smallButtonGreen = {
+  padding: "8px 12px",
+  background: "#16a34a",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: "bold",
+};
+
+const smallButtonPurple = {
+  padding: "8px 12px",
+  background: "#7c3aed",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: "bold",
+};
+
+const activeTabStyle = {
+  padding: "10px 14px",
+  background: "#0f172a",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontWeight: "bold",
+};
+
+const inactiveTabStyle = {
+  padding: "10px 14px",
+  background: "#e2e8f0",
+  color: "#0f172a",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontWeight: "bold",
+};
+
+const cardStyle = {
+  background: "white",
+  border: "1px solid #dbe4f0",
+  borderRadius: "20px",
+  padding: "18px",
+  boxShadow: "0 6px 18px rgba(15, 23, 42, 0.05)",
+};
+
+const reviewCardStyle = {
+  background: "#eff6ff",
+  border: "1px solid #bfdbfe",
+  borderRadius: "16px",
+  padding: "16px",
+};
+
+const infoBoxStyle = {
+  background: "#f8fafc",
+  border: "1px solid #cbd5e1",
+  borderRadius: "12px",
+  padding: "12px",
+  marginBottom: "12px",
+};
+
+const aiNoteStyle = {
+  marginTop: "20px",
+  background: "#fff7ed",
+  border: "1px solid #fed7aa",
+  borderRadius: "16px",
+  padding: "16px",
+};
+
+const thStyle = {
+  textAlign: "left",
+  padding: "12px",
+  borderBottom: "1px solid #e2e8f0",
+  whiteSpace: "nowrap",
+};
+
+const tdStyle = {
+  padding: "12px",
+  borderBottom: "1px solid #e2e8f0",
+  verticalAlign: "top",
+};
+
+const criticalAlertOverlayStyle = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.45)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 9999,
+  padding: 20,
+};
+
+const criticalAlertBoxStyle = {
+  width: "100%",
+  maxWidth: 760,
+  maxHeight: "85vh",
+  overflowY: "auto",
+  background: "#ffffff",
+  borderRadius: 24,
+  padding: 24,
+  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+  border: "2px solid #fecaca",
+};
+
+const criticalAlertHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 16,
+  marginBottom: 18,
+  flexWrap: "wrap",
+};
+
+const criticalAlertTitleStyle = {
+  fontSize: 26,
+  fontWeight: "bold",
+  color: "#b91c1c",
+};
+
+const criticalAlertCounterStyle = {
+  background: "#fee2e2",
+  color: "#991b1b",
+  border: "1px solid #fecaca",
+  borderRadius: 999,
+  padding: "8px 14px",
+  fontWeight: "bold",
+  fontSize: 14,
+};
+
+const criticalAlertListStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const criticalAlertItemStyle = {
+  background: "#fff7ed",
+  border: "1px solid #fed7aa",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const criticalAlertItemTopStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 16,
+  marginBottom: 12,
+  flexWrap: "wrap",
+};
+
+const criticalAlertDetailsStyle = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 16,
+  padding: 16,
+  lineHeight: 1.9,
+};
+
+const checkboxGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 10,
+  marginTop: 8,
+};
+
+const checkboxItemStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 12,
+  padding: "10px 12px",
+};
+
+const dashboardGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+  marginTop: 20,
+  marginBottom: 20,
+};
+
+const metricLabelStyle = {
+  color: "#64748b",
+  fontSize: 14,
+};
+
+const metricValueStyle = {
+  fontSize: 28,
+  fontWeight: "bold",
+  marginTop: 8,
+};
+
+const filtersGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+  marginTop: 10,
+};
+
+const auditCardStyle = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 14,
+  padding: 12,
+};
+
+const criticalRowStyle = {
+  background: "#fff7f7",
+};
+
+const editBoxStyle = {
+  marginTop: 20,
+  background: "#f8fafc",
+  border: "1px solid #cbd5e1",
+  borderRadius: 16,
+  padding: 16,
+};
