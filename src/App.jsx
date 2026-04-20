@@ -3377,4 +3377,3 @@ const editBoxStyle = {
   borderRadius: 16,
   padding: 16,
 };
-ping stat aplication with port to host ping
